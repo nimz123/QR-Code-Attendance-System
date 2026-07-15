@@ -1,7 +1,9 @@
 {
-  "name": "react-example",
+  "name": "khlareskwela-qr-attendance-system",
   "private": true,
   "version": "0.0.0",
+  "description": "KhlarEskwela QR Attendance System",
+  "author": "Nimrold Albaracin",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
@@ -35,4 +37,4 @@
     "typescript": "~5.8.2",
     "vite": "^6.2.3"
   }
-}
+}      
