@@ -1,7 +1,9 @@
 export interface Student {
   id: string;
   name: string;
+  username?: string;
   photoUrl?: string;
+  sectionId?: string;
 }
 
 export interface Section {
@@ -9,6 +11,11 @@ export interface Section {
   name: string;
   students: Student[];
   startTime: string; // "HH:MM" e.g., "08:30"
+  // Public display fields for the owning teacher (present on /api/state/public)
+  teacherName?: string;
+  teacherPhotoUrl?: string | null;
+  room?: string | null;
+  subject?: string | null;
 }
 
 export interface AttendanceRecord {
@@ -25,6 +32,20 @@ export interface AttendanceRecord {
   timestamp: string; // ISO string of submission
 }
 
+export interface Teacher {
+  id: number;
+  username: string;
+  name: string;
+  photo?: string | null;
+  room?: string | null;
+  subject?: string | null;
+}
+
+export type AuthUser =
+  | ({ role: 'admin' } & { username: string })
+  | ({ role: 'teacher' } & Teacher)
+  | ({ role: 'student' } & Pick<Student, 'id' | 'name' | 'username' | 'photoUrl' | 'sectionId'>);
+
 export function formatTimeToAMPM(timeStr: string): string {
   if (!timeStr) return '';
   const parts = timeStr.split(':');
@@ -37,4 +58,3 @@ export function formatTimeToAMPM(timeStr: string): string {
   const displayMinutes = minutes < 10 ? `0${minutes}` : minutes;
   return `${displayHours}:${displayMinutes} ${ampm}`;
 }
-

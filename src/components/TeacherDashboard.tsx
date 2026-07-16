@@ -14,8 +14,7 @@ import {
   Calendar, 
   CheckCircle, 
   AlertTriangle, 
-  Info, 
-  UserPlus, 
+  Info,
   Sliders,
   Sparkles,
   LogOut
@@ -26,7 +25,6 @@ interface TeacherDashboardProps {
   records: AttendanceRecord[];
   onAddSection: (name: string, startTime: string) => void;
   onDeleteSection: (id: string) => void;
-  onAddStudents: (sectionId: string, studentNames: string[]) => void;
   onDeleteStudent: (sectionId: string, studentId: string) => void;
   onUpdateSectionTime: (sectionId: string, startTime: string) => void;
   onClearRecords: () => void;
@@ -39,7 +37,6 @@ export default function TeacherDashboard({
   records,
   onAddSection,
   onDeleteSection,
-  onAddStudents,
   onDeleteStudent,
   onUpdateSectionTime,
   onClearRecords,
@@ -49,15 +46,11 @@ export default function TeacherDashboard({
   // Navigation tabs
   const [activeTab, setActiveTab] = useState<'qr' | 'sections' | 'records'>('qr');
   const [enlargedQR, setEnlargedQR] = useState<{ url: string; title: string; subtitle: string; type: 'in' | 'out' } | null>(null);
-  
+
   // Section form state
   const [newSectionName, setNewSectionName] = useState('');
   const [newSectionTime, setNewSectionTime] = useState('08:30');
-  
-  // Student form state
-  const [selectedSectionForStudents, setSelectedSectionForStudents] = useState(sections[0]?.id || '');
-  const [rawStudentNames, setRawStudentNames] = useState('');
-  
+
   // QR code state
   const [selectedSectionForQR, setSelectedSectionForQR] = useState<string>('all');
   
@@ -67,41 +60,12 @@ export default function TeacherDashboard({
   const [recordStatusFilter, setRecordStatusFilter] = useState('all');
   const [recordDateFilter, setRecordDateFilter] = useState('');
 
-  // Auto-update section selection if sections change and current selection is invalid
-  React.useEffect(() => {
-    if (sections.length > 0 && !sections.find(s => s.id === selectedSectionForStudents)) {
-      setSelectedSectionForStudents(sections[0].id);
-    }
-  }, [sections, selectedSectionForStudents]);
-
   // Handle adding new section
   const handleAddSectionSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSectionName.trim()) return;
     onAddSection(newSectionName.trim(), newSectionTime);
     setNewSectionName('');
-    // Auto select the newly created section for students view if it's the first one
-    if (sections.length === 0) {
-      setSelectedSectionForStudents('new-id-placeholder'); 
-    }
-  };
-
-  // Handle pasting/adding raw student list
-  const handleAddStudentsSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const sectionId = selectedSectionForStudents;
-    if (!sectionId) return;
-
-    // Split student names by newline or commas, remove empty elements
-    const names = rawStudentNames
-      .split(/[\n,]+/)
-      .map(name => name.trim())
-      .filter(name => name.length > 0);
-
-    if (names.length === 0) return;
-    
-    onAddStudents(sectionId, names);
-    setRawStudentNames('');
   };
 
   // Generate target URL for QR Code scanning
@@ -332,9 +296,9 @@ export default function TeacherDashboard({
           <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-xs text-amber-800 flex gap-2.5">
             <Info size={16} className="text-amber-600 shrink-0 mt-0.5" />
             <div>
-              <p className="font-semibold">Local Storage Mode</p>
+              <p className="font-semibold">Student Accounts</p>
               <p className="mt-1 text-amber-700/90 leading-normal">
-                Firebase was declined. Your data is safely stored in your local browser storage.
+                Student accounts are created by an administrator. You can remove a student from your roster below, but new accounts must be added via the Admin Dashboard.
               </p>
             </div>
           </div>
@@ -613,68 +577,11 @@ export default function TeacherDashboard({
               </form>
             </div>
 
-            {/* Put student class list in a section */}
-            <div id="student-list-manager" className="bg-white rounded-2xl border border-gray-100 shadow-xs p-6 grid grid-cols-1 md:grid-cols-5 gap-6">
-              
-              {/* Left panel: Add students */}
-              <div className="md:col-span-2 space-y-4">
-                <div>
-                  <h3 className="text-base font-bold text-gray-900 flex items-center gap-1.5">
-                    <UserPlus size={18} className="text-indigo-600" />
-                    <span>Upload Student Class List</span>
-                  </h3>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    Paste all student names in one section easily.
-                  </p>
-                </div>
-
-                <form onSubmit={handleAddStudentsSubmit} className="space-y-4">
-                  <div className="space-y-1.5">
-                    <label htmlFor="select-student-section" className="text-xs font-bold text-gray-600 uppercase tracking-wider">Target Section</label>
-                    <select
-                      id="select-student-section"
-                      value={selectedSectionForStudents}
-                      onChange={(e) => setSelectedSectionForStudents(e.target.value)}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-                    >
-                      {sections.map(s => (
-                        <option key={s.id} value={s.id}>{s.name} (Start: {formatTimeToAMPM(s.startTime)})</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label htmlFor="textarea-student-names" className="text-xs font-bold text-gray-600 uppercase tracking-wider flex justify-between">
-                      <span>Student Class List</span>
-                      <span className="text-[10px] text-gray-400 font-normal">Line or comma separated</span>
-                    </label>
-                    <textarea
-                      id="textarea-student-names"
-                      rows={5}
-                      required
-                      placeholder=" "
-                      value={rawStudentNames}
-                      onChange={(e) => setRawStudentNames(e.target.value)}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-sans"
-                    ></textarea>
-                  </div>
-
-                  <button
-                    id="btn-add-students"
-                    type="submit"
-                    disabled={!selectedSectionForStudents}
-                    className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white font-medium text-sm py-2.5 rounded-xl transition shadow-xs flex items-center justify-center gap-2"
-                  >
-                    <UserPlus size={16} />
-                    <span>Add All Students to Class</span>
-                  </button>
-                </form>
-              </div>
-
-              {/* Right panel: View / edit current list of students in sections */}
-              <div id="section-lists-preview" className="md:col-span-3 space-y-4 border-t md:border-t-0 md:border-l border-gray-100 pt-4 md:pt-0 md:pl-6">
+            {/* Class list preview (student accounts are created via the Admin Dashboard) */}
+            <div id="student-list-manager" className="bg-white rounded-2xl border border-gray-100 shadow-xs p-6">
+              <div id="section-lists-preview" className="space-y-4">
                 <h3 className="text-base font-bold text-gray-900">Current Class Lists</h3>
-                
+
                 {sections.length === 0 ? (
                   <div className="text-center py-8 text-gray-400 text-sm">
                     No sections created yet. Create a class section first!
@@ -722,7 +629,7 @@ export default function TeacherDashboard({
 
                         {/* List of students */}
                         {section.students.length === 0 ? (
-                          <p className="text-xs text-gray-400 italic">No students in this class. Paste some on the left panel!</p>
+                          <p className="text-xs text-gray-400 italic">No students in this class yet. Ask an admin to create student accounts for this section.</p>
                         ) : (
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1.5">
                             {section.students.map((student) => (
