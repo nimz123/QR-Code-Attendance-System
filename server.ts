@@ -120,11 +120,54 @@ app.get("/api/auth/me", async (req, res) => {
   }
 });
 
+// ===================== PUBLIC / GENERAL TEACHERS ENDPOINT =====================
+
+app.get("/api/teachers", async (req, res) => {
+  try {
+    const teachers = await prisma.teacher.findMany({
+      select: teacherPublicSelect,
+      orderBy: { name: "asc" },
+    });
+    res.json({ success: true, teachers });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, error: "Failed to fetch teachers." });
+  }
+});
+
 // ===================== ADMIN: TEACHERS =====================
 
 app.get("/api/admin/teachers", requireRole("admin"), async (req, res) => {
   const teachers = await prisma.teacher.findMany({ select: teacherPublicSelect, orderBy: { name: "asc" } });
   res.json({ success: true, teachers });
+});
+
+// Fetch full details of a specific teacher (including all sections and students) when clicked by Admin
+app.get("/api/admin/teachers/:id/details", requireRole("admin"), async (req, res) => {
+  try {
+    const teacherId = Number(req.params.id);
+    const teacher = await prisma.teacher.findUnique({
+      where: { id: teacherId },
+      select: teacherPublicSelect,
+    });
+
+    if (!teacher) {
+      return res.status(404).json({ success: false, error: "Teacher not found." });
+    }
+
+    const sections = await prisma.section.findMany({
+      where: { teacherId },
+      include: {
+        students: { select: studentPublicSelect },
+      },
+      orderBy: { name: "asc" },
+    });
+
+    res.json({ success: true, teacher, sections });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, error: "Failed to fetch teacher details." });
+  }
 });
 
 app.post("/api/admin/teachers", requireRole("admin"), async (req, res) => {
@@ -182,18 +225,24 @@ app.delete("/api/admin/teachers/:id", requireRole("admin"), async (req, res) => 
   }
 });
 
-// ===================== ADMIN: SECTIONS (read-only, for the student-creation picker) =====================
+// ===================== ADMIN: SECTIONS =====================
 
 app.get("/api/admin/sections", requireRole("admin"), async (req, res) => {
-  const teacherId = req.query.teacherId ? Number(req.query.teacherId) : undefined;
-  const sections = await prisma.section.findMany({
-    where: teacherId ? { teacherId } : undefined,
-    select: { id: true, name: true, startTime: true },
-    orderBy: { name: "asc" },
-  });
-  res.json({ success: true, sections });
+  try {
+    const teacherId = req.query.teacherId ? Number(req.query.teacherId) : undefined;
+    const sections = await prisma.section.findMany({
+      where: teacherId ? { teacherId } : undefined,
+      include: {
+        students: { select: studentPublicSelect },
+      },
+      orderBy: { name: "asc" },
+    });
+    res.json({ success: true, sections });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, error: "Failed to fetch sections." });
+  }
 });
-
 // ===================== ADMIN: STUDENTS =====================
 
 app.get("/api/admin/students", requireRole("admin"), async (req, res) => {
@@ -342,7 +391,35 @@ app.delete("/api/sections/:id", requireRole("teacher"), async (req, res) => {
   }
 });
 
-// ===================== TEACHER: STUDENT ROSTER (delete only — creation is admin-only) =====================
+// ===================== TEACHER: STUDENT MANAGEMENT (Creation & Deletion) =====================
+
+app.post("/api/teacher/students", requireRole("teacher"), async (req, res) => {
+  try {
+    const { sectionId, username, password, name } = req.body;
+    if (!sectionId || !username || !password || !name) {
+      return res.status(400).json({ success: false, error: "Section, username, password, and name are required." });
+    }
+
+    // Verify section ownership
+    const section = await prisma.section.findUnique({ where: { id: sectionId } });
+    if (!section || section.teacherId !== req.user!.id) {
+      return res.status(403).json({ success: false, error: "Section not found or unauthorized." });
+    }
+
+    const passwordHash = await hashPassword(password);
+    const student = await prisma.student.create({
+      data: { id: randomUUID(), sectionId, username, passwordHash, name },
+      select: studentPublicSelect,
+    });
+    res.json({ success: true, student });
+  } catch (error: any) {
+    if (error.code === "P2002") {
+      return res.status(409).json({ success: false, error: "That username is already taken." });
+    }
+    console.error(error);
+    res.status(500).json({ success: false, error: "Failed to create student." });
+  }
+});
 
 app.delete("/api/students/:id", requireRole("teacher"), async (req, res) => {
   try {
@@ -385,7 +462,7 @@ app.get("/api/student/records", requireRole("student"), async (req, res) => {
   }
 });
 
-// ===================== PUBLIC: CHECK-IN (no auth — kiosk/QR flow) =====================
+// ===================== PUBLIC: CHECK-IN =====================
 
 app.get("/api/state/public", async (req, res) => {
   try {

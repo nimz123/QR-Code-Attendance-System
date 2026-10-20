@@ -6,14 +6,18 @@ import LoginPage from './components/LoginPage';
 import AdminDashboard from './components/AdminDashboard';
 import StudentAttendanceHistory from './components/StudentAttendanceHistory';
 import { apiFetch } from './lib/api';
-import {
-  School,
-  Lock,
-  Unlock,
-  User,
-  Clock,
-  Sparkles,
-  Settings
+import { 
+  Sun, 
+  Moon, 
+  School, 
+  Lock, 
+  Unlock, 
+  User, 
+  Clock, 
+  Sparkles, 
+  Settings,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -25,6 +29,45 @@ function roleView(role: AuthUser['role']): ViewName {
   return 'my-attendance';
 }
 
+// Dark Mode Toggle Component with Sun & Moon Icons
+function DarkModeToggle() {
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    return (
+      localStorage.getItem('theme') === 'dark' ||
+      (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)
+    );
+  });
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (isDarkMode) {
+      root.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      root.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
+    }
+  }, [isDarkMode]);
+
+  return (
+    <button
+      id="theme-toggle-btn"
+      type="button"
+      onClick={() => setIsDarkMode(!isDarkMode)}
+      className="p-2.5 rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-100 border border-gray-300 dark:border-gray-700 hover:bg-gray-200 dark:hover:bg-gray-700 transition-all cursor-pointer flex items-center justify-center shrink-0 shadow-sm"
+      title={isDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+      aria-label="Toggle Theme"
+    >
+      {isDarkMode ? (
+        <Sun size={18} className="text-amber-400 fill-amber-400 shrink-0 block" />
+      ) : (
+        <Moon size={18} className="text-slate-700 dark:text-slate-200 fill-slate-700 shrink-0 block" />
+      )}
+    </button>
+  );
+}
+
+// Main App Component
 export default function App() {
   // Publicly-visible sections for the anonymous check-in flow (all teachers)
   const [sections, setSections] = useState<Section[]>([]);
@@ -47,6 +90,9 @@ export default function App() {
   const [newTeacherRoom, setNewTeacherRoom] = useState('');
   const [newTeacherSubject, setNewTeacherSubject] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  
+  // Password hide/unhide state for settings/forms
+  const [showPassword, setShowPassword] = useState(false);
 
   // Live clock display state
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -93,13 +139,6 @@ export default function App() {
     return () => clearInterval(interval);
   }, [authUser]);
 
-  // If the session is lost while on a protected view, fall back to check-in
-  useEffect(() => {
-    if (!authUser && currentView !== 'checkin' && currentView !== 'login') {
-      setCurrentView('checkin');
-    }
-  }, [authUser, currentView]);
-
   // Live ticking clock
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -112,14 +151,27 @@ export default function App() {
   };
 
   const handleLogOut = async () => {
-    await apiFetch('/api/auth/logout', { method: 'POST' });
-    setAuthUser(null);
-    setTeacherSections([]);
-    setTeacherRecords([]);
-    setCurrentView('checkin');
+    try {
+      await apiFetch('/api/auth/logout', { method: 'POST' });
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      // 1. Completely clear browser storage
+      localStorage.removeItem('authUser');
+      localStorage.removeItem('token');
+      localStorage.clear();
+
+      // 2. Reset states
+      setAuthUser(null);
+      setTeacherSections([]);
+      setTeacherRecords([]);
+
+      // 3. Redirect view to login page to display the 3 options
+      setCurrentView('login');
+    }
   };
 
-  // Core functions called by Teacher Dashboard (all teacher-scoped, server derives ownership from the session)
+  // Core functions called by Teacher Dashboard
   const handleAddSection = async (name: string, startTime: string) => {
     const { ok, data } = await apiFetch('/api/sections', {
       method: 'POST',
@@ -149,7 +201,6 @@ export default function App() {
     );
   };
 
-  // Photo capture stays unauthenticated (kiosk check-in flow); used from both StudentPortal and TeacherDashboard
   const handleUpdateStudentPhoto = async (sectionId: string, studentId: string, photoUrl: string) => {
     await apiFetch('/api/student/photo', {
       method: 'POST',
@@ -170,7 +221,6 @@ export default function App() {
     setTeacherRecords([]);
   };
 
-  // Student Attendance Submission logic (compares arrival time to section startTime); stays unauthenticated
   const handleSubmitAttendance = async (
     studentId: string,
     studentName: string,
@@ -246,10 +296,10 @@ export default function App() {
   const isStudent = authUser?.role === 'student';
 
   return (
-    <div id="app-root-container" className="min-h-screen bg-gray-50/70 text-gray-800 font-sans flex flex-col antialiased">
+    <div id="app-root-container" className="min-h-screen bg-gray-50/70 dark:bg-gray-950 text-gray-800 dark:text-gray-100 font-sans flex flex-col antialiased transition-colors">
 
       {/* 1. APP NAVBAR HEADER */}
-      <header id="app-navbar" className="bg-white border-b border-gray-100 py-4 px-4 sm:px-6 sticky top-0 z-40 backdrop-blur-md bg-white/90">
+      <header id="app-navbar" className="bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800 py-4 px-4 sm:px-6 sticky top-0 z-40 backdrop-blur-md bg-white/90 dark:bg-gray-900/90 transition-colors">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
 
           {/* Logo Brand */}
@@ -258,16 +308,16 @@ export default function App() {
               <School size={22} className="stroke-2" />
             </div>
             <div>
-              <span className="font-display font-black text-lg text-gray-900 tracking-tight block"></span>
+              <span className="font-display font-black text-lg text-gray-900 dark:text-white tracking-tight block">KhlarEskwela</span>
               <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 mt-0.5">
                 <div className="flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
-                  <span className="text-[10px] text-gray-400 font-mono tracking-wider font-semibold uppercase">System Live</span>
+                  <span className="text-[10px] text-gray-400 dark:text-gray-500 font-mono tracking-wider font-semibold uppercase">System Live</span>
                 </div>
                 {(isTeacher || isStudent) && (
                   <>
-                    <span className="text-gray-300 text-[10px] hidden sm:inline">•</span>
-                    <span className="text-[10px] text-indigo-600 font-bold uppercase tracking-wider font-mono flex items-center gap-1">
+                    <span className="text-gray-300 dark:text-gray-700 text-[10px] hidden sm:inline">•</span>
+                    <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold uppercase tracking-wider font-mono flex items-center gap-1">
                       {isTeacher && authUser && 'photo' in authUser && authUser.photo && (
                         <img
                           src={authUser.photo}
@@ -285,43 +335,46 @@ export default function App() {
           </div>
 
           {/* Clock Widget */}
-          <div id="live-clock-widget" className="hidden md:flex items-center gap-2.5 bg-gray-50 border border-gray-100 rounded-2xl px-4 py-1.5 text-xs text-gray-500 font-mono font-medium shadow-xs">
-            <Clock size={14} className="text-indigo-600 animate-pulse" />
+          <div id="live-clock-widget" className="hidden md:flex items-center gap-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl px-4 py-1.5 text-xs text-gray-500 dark:text-gray-400 font-mono font-medium shadow-xs">
+            <Clock size={14} className="text-indigo-600 dark:text-indigo-400 animate-pulse" />
             <span>Classroom Clock:</span>
-            <strong className="text-gray-900">
+            <strong className="text-gray-900 dark:text-gray-100">
               {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
             </strong>
           </div>
 
-          {/* Nav Actions / View Switcher Toggle */}
-          <div className="flex items-center gap-2.5 bg-gray-100 p-1 rounded-2xl border border-gray-200">
+          {/* Nav Actions / View Switcher Toggle & Dark Mode */}
+          <div className="flex items-center gap-3">
+            {/* Dark Mode Sun & Moon Toggle */}
+            <DarkModeToggle />
 
-            <button
-              id="switch-to-checkin-btn"
-              onClick={() => setCurrentView('checkin')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all duration-150 ${
-                currentView === 'checkin'
-                  ? 'bg-white text-indigo-700 shadow-xs'
-                  : 'text-gray-500 hover:text-gray-800'
-              }`}
-            >
-              <User size={14} />
-              <span>Check-In</span>
-            </button>
+            <div className="flex items-center gap-2.5 bg-gray-100 dark:bg-gray-800 p-1 rounded-2xl border border-gray-200 dark:border-gray-700">
+              <button
+                id="switch-to-checkin-btn"
+                onClick={() => setCurrentView('checkin')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all duration-150 cursor-pointer ${
+                  currentView === 'checkin'
+                    ? 'bg-white dark:bg-gray-700 text-indigo-700 dark:text-indigo-300 shadow-xs'
+                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
+                }`}
+              >
+                <User size={14} />
+                <span>Check-In</span>
+              </button>
 
-            <button
-              id="switch-to-dashboard-btn"
-              onClick={() => setCurrentView(authUser ? roleView(authUser.role) : 'login')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all duration-150 ${
-                currentView !== 'checkin'
-                  ? 'bg-indigo-600 text-white shadow-xs'
-                  : 'text-gray-500 hover:text-indigo-600'
-              }`}
-            >
-              {authUser ? <Unlock size={14} /> : <Lock size={14} />}
-              <span>{authUser ? (isTeacher ? 'Teacher Dashboard' : isStudent ? 'My Attendance' : 'Admin Dashboard') : 'Sign In'}</span>
-            </button>
-
+              <button
+                id="switch-to-dashboard-btn"
+                onClick={() => setCurrentView(authUser ? roleView(authUser.role) : 'login')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all duration-150 cursor-pointer ${
+                  currentView !== 'checkin'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400'
+                }`}
+              >
+                {authUser ? <Unlock size={14} /> : <Lock size={14} />}
+                <span>{authUser ? (isTeacher ? 'Teacher Dashboard' : isStudent ? 'My Attendance' : 'Admin Dashboard') : 'Sign In'}</span>
+              </button>
+            </div>
           </div>
 
         </div>
@@ -351,7 +404,7 @@ export default function App() {
 
           {currentView === 'admin' && authUser?.role === 'admin' && (
             <motion.div key="admin-view" initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -15 }} transition={{ duration: 0.2 }}>
-              <AdminDashboard onLogOut={handleLogOut} />
+              <AdminDashboard onLogout={handleLogOut} />
             </motion.div>
           )}
 
@@ -365,11 +418,11 @@ export default function App() {
             <motion.div key="teacher-dashboard-view" initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -15 }} transition={{ duration: 0.2 }} className="relative">
               <div className="flex items-center justify-between mb-6">
                 <div>
-                  <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                  <span className="inline-flex items-center gap-1 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
                     <Sparkles size={10} />
                     <span>Instructor Access</span>
                   </span>
-                  <h1 className="text-2xl sm:text-3xl font-bold font-display text-gray-900 tracking-tight mt-1">Teacher Dashboard</h1>
+                  <h1 className="text-2xl sm:text-3xl font-bold font-display text-gray-900 dark:text-white tracking-tight mt-1">Teacher Dashboard</h1>
                 </div>
 
                 <button
@@ -380,9 +433,10 @@ export default function App() {
                     setNewTeacherRoom(authUser.room || '');
                     setNewTeacherSubject(authUser.subject || '');
                     setNewPassword('');
+                    setShowPassword(false);
                     setIsSettingsOpen(true);
                   }}
-                  className="flex items-center gap-1.5 bg-white border border-gray-200 text-gray-600 hover:text-indigo-600 px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-xs"
+                  className="flex items-center gap-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
                 >
                   <Settings size={14} />
                   <span>Configure Profile</span>
@@ -406,7 +460,7 @@ export default function App() {
 
       </main>
 
-      {/* 3. SETTINGS CHANGE PROFILE MODAL (teacher only) */}
+      {/* 3. SETTINGS CHANGE PROFILE MODAL */}
       <AnimatePresence>
         {isSettingsOpen && authUser?.role === 'teacher' && (
           <div id="settings-modal-overlay" className="fixed inset-0 bg-black/55 backdrop-blur-xs flex items-center justify-center p-4 z-50">
@@ -414,16 +468,16 @@ export default function App() {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-gray-100 space-y-4"
+              className="bg-white dark:bg-gray-900 rounded-2xl max-w-sm w-full p-6 shadow-xl border border-gray-100 dark:border-gray-800 space-y-4"
             >
-              <div className="flex justify-between items-center border-b border-gray-100 pb-2">
-                <h3 className="text-base font-bold text-gray-900">Configure Profile & Security</h3>
-                <span className="text-[10px] bg-indigo-50 text-indigo-700 font-bold px-2 py-0.5 rounded-full">Settings</span>
+              <div className="flex justify-between items-center border-b border-gray-100 dark:border-gray-800 pb-2">
+                <h3 className="text-base font-bold text-gray-900 dark:text-white">Configure Profile & Security</h3>
+                <span className="text-[10px] bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-bold px-2 py-0.5 rounded-full">Settings</span>
               </div>
 
               <form onSubmit={handleSaveProfile} className="space-y-4">
                 <div className="space-y-1.5">
-                  <label htmlFor="settings-teacher-name" className="text-xs font-bold text-gray-600 uppercase tracking-wider block">Teacher Name / Title</label>
+                  <label htmlFor="settings-teacher-name" className="text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider block">Teacher Name / Title</label>
                   <input
                     id="settings-teacher-name"
                     type="text"
@@ -431,15 +485,14 @@ export default function App() {
                     placeholder="Mr. Smith"
                     value={newTeacherName}
                     onChange={(e) => setNewTeacherName(e.target.value)}
-                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                    className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-sm font-semibold text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                   />
-                  <p className="text-[10px] text-gray-400">This name appears on the student portal and report receipts.</p>
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-xs font-bold text-gray-600 uppercase tracking-wider block">Teacher Photo</label>
+                  <label className="text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider block">Teacher Photo</label>
                   <div className="flex items-center gap-4">
-                    <div className="w-16 h-16 rounded-2xl bg-gray-50 border border-gray-200 flex items-center justify-center overflow-hidden shrink-0 relative">
+                    <div className="w-16 h-16 rounded-2xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 flex items-center justify-center overflow-hidden shrink-0 relative">
                       {newTeacherPhoto ? (
                         <img
                           src={newTeacherPhoto}
@@ -452,7 +505,7 @@ export default function App() {
                       )}
                     </div>
                     <div className="flex flex-col gap-1.5">
-                      <label className="cursor-pointer bg-white border border-gray-200 text-gray-700 hover:text-indigo-600 font-semibold text-[11px] px-3 py-1.5 rounded-lg transition text-center shadow-2xs">
+                      <label className="cursor-pointer bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:text-indigo-600 font-semibold text-[11px] px-3 py-1.5 rounded-lg transition text-center shadow-2xs">
                         <span>Upload Photo</span>
                         <input
                           id="settings-teacher-photo-input"
@@ -482,7 +535,7 @@ export default function App() {
                           id="btn-remove-teacher-photo"
                           type="button"
                           onClick={() => setNewTeacherPhoto('')}
-                          className="text-rose-600 hover:text-rose-800 font-bold text-[10px] uppercase text-left tracking-wider"
+                          className="text-rose-600 hover:text-rose-800 font-bold text-[10px] uppercase text-left tracking-wider cursor-pointer"
                         >
                           Remove Photo
                         </button>
@@ -492,41 +545,52 @@ export default function App() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label htmlFor="settings-teacher-room" className="text-xs font-bold text-gray-600 uppercase tracking-wider block">ROOM (Optional)</label>
+                  <label htmlFor="settings-teacher-room" className="text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider block">ROOM (Optional)</label>
                   <input
                     id="settings-teacher-room"
                     type="text"
                     placeholder="Room 101, Science Lab"
                     value={newTeacherRoom}
                     onChange={(e) => setNewTeacherRoom(e.target.value)}
-                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                    className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-sm font-semibold text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                   />
                 </div>
 
                 <div className="space-y-1.5">
-                  <label htmlFor="settings-teacher-subject" className="text-xs font-bold text-gray-600 uppercase tracking-wider block">SUBJECT (Optional)</label>
+                  <label htmlFor="settings-teacher-subject" className="text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider block">SUBJECT (Optional)</label>
                   <input
                     id="settings-teacher-subject"
                     type="text"
                     placeholder="Mathematics, Science"
                     value={newTeacherSubject}
                     onChange={(e) => setNewTeacherSubject(e.target.value)}
-                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                    className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-sm font-semibold text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                   />
                 </div>
 
-                <div className="space-y-1.5">
-                  <label htmlFor="settings-new-password" className="text-xs font-bold text-gray-600 uppercase tracking-wider block">Change Security Password (Optional)</label>
-                  <input
-                    id="settings-new-password"
-                    type="password"
-                    minLength={4}
-                    placeholder="Leave blank to keep existing"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-mono"
-                  />
-                  <p className="text-[10px] text-gray-400">At least 4 characters. This password restricts entry to reports and class customization.</p>
+                {/* Password Input with Eye / EyeOff Hide and Unhide feature */}
+                <div className="space-y-1.5 relative">
+                  <label htmlFor="settings-new-password" className="text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider block">Change Security Password (Optional)</label>
+                  <div className="relative">
+                    <input
+                      id="settings-new-password"
+                      type={showPassword ? 'text' : 'password'}
+                      minLength={4}
+                      placeholder="Leave blank to keep existing"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 pr-10 text-sm font-semibold text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer"
+                      title={showPassword ? "Hide Password" : "Show Password"}
+                    >
+                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-gray-400">At least 4 characters if changing.</p>
                 </div>
 
                 <div className="flex gap-2 justify-end pt-2">
@@ -534,14 +598,14 @@ export default function App() {
                     id="btn-cancel-settings"
                     type="button"
                     onClick={() => setIsSettingsOpen(false)}
-                    className="bg-white hover:bg-gray-50 text-gray-600 border border-gray-200 font-semibold text-xs px-4 py-2.5 rounded-xl transition"
+                    className="bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 font-semibold text-xs px-4 py-2.5 rounded-xl transition cursor-pointer"
                   >
                     Cancel
                   </button>
                   <button
                     id="btn-save-settings"
                     type="submit"
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow-xs"
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow-xs cursor-pointer"
                   >
                     Save Changes
                   </button>
@@ -553,9 +617,9 @@ export default function App() {
       </AnimatePresence>
 
       {/* 4. APP FOOTER */}
-      <footer id="app-footer" className="bg-white border-t border-gray-100 py-6 px-4 mt-12 text-center text-xs text-gray-400">
+      <footer id="app-footer" className="bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800 py-6 px-4 mt-12 text-center text-xs text-gray-400 transition-colors">
         <div className="max-w-7xl mx-auto space-y-1.5">
-          <p className="font-semibold text-gray-500">QR Attendance Portal — Secure School Management</p>
+          <p className="font-semibold text-gray-500 dark:text-gray-400">QR Attendance Portal — Secure School Management</p>
           <p>Developed by Nimrold Albaracin for students to log student arrival punctuality.</p>
         </div>
       </footer>

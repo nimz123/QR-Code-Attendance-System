@@ -6,3 +6,6 @@
   --font-display: "Space Grotesk", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
+
+
+@custom-variant dark (&:where(.dark, .dark *));

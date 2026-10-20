@@ -17,8 +17,14 @@ import {
   Info,
   Sliders,
   Sparkles,
-  LogOut
+  LogOut,
+  UserPlus,
+  Eye,
+  EyeOff,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
+import { apiFetch } from '../lib/api';
 
 interface TeacherDashboardProps {
   sections: Section[];
@@ -43,7 +49,7 @@ export default function TeacherDashboard({
   onUpdateStudentPhoto,
   onLogOut
 }: TeacherDashboardProps) {
-  // Navigation tabs
+  // Navigation tabs state
   const [activeTab, setActiveTab] = useState<'qr' | 'sections' | 'records'>('qr');
   const [enlargedQR, setEnlargedQR] = useState<{ url: string; title: string; subtitle: string; type: 'in' | 'out' } | null>(null);
 
@@ -51,21 +57,75 @@ export default function TeacherDashboard({
   const [newSectionName, setNewSectionName] = useState('');
   const [newSectionTime, setNewSectionTime] = useState('08:30');
 
-  // QR code state
+  // Expanded section state for student management UI
+  const [expandedSectionId, setExpandedSectionId] = useState<string | null>(null);
+
+  // New student form states
+  const [studentName, setStudentName] = useState('');
+  const [studentUsername, setStudentUsername] = useState('');
+  const [studentPassword, setStudentPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [isSubmittingStudent, setIsSubmittingStudent] = useState(false);
+
+  // QR code filter state
   const [selectedSectionForQR, setSelectedSectionForQR] = useState<string>('all');
   
-  // Records filter state
+  // Attendance records filter states
   const [recordSearch, setRecordSearch] = useState('');
   const [recordSectionFilter, setRecordSectionFilter] = useState('all');
   const [recordStatusFilter, setRecordStatusFilter] = useState('all');
   const [recordDateFilter, setRecordDateFilter] = useState('');
 
-  // Handle adding new section
+  // Handle adding a new section
   const handleAddSectionSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSectionName.trim()) return;
     onAddSection(newSectionName.trim(), newSectionTime);
     setNewSectionName('');
+  };
+
+  // Handle student account creation by teacher without page reload
+  const handleAddStudent = async (e: React.FormEvent, sectionId: string) => {
+    e.preventDefault();
+    if (!studentName.trim() || !studentUsername.trim() || !studentPassword.trim()) {
+      alert('Please complete all student information fields.');
+      return;
+    }
+
+    setIsSubmittingStudent(true);
+    try {
+      const { ok, data } = await apiFetch('/api/teacher/students', {
+        method: 'POST',
+        body: JSON.stringify({
+          sectionId,
+          name: studentName.trim(),
+          username: studentUsername.trim(),
+          password: studentPassword.trim(),
+        }),
+      });
+
+      if (ok && data.success) {
+        alert(`Student account created successfully for ${studentName}!`);
+        
+        // Directly push new student to the local section array to avoid full page reload
+        const targetSection = sections.find(s => s.id === sectionId);
+        if (targetSection) {
+          targetSection.students = [...(targetSection.students || []), data.student];
+        }
+
+        // Reset form inputs
+        setStudentName('');
+        setStudentUsername('');
+        setStudentPassword('');
+      } else {
+        alert(data.error || 'Failed to create student account.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('An error occurred while creating the student account.');
+    } finally {
+      setIsSubmittingStudent(false);
+    }
   };
 
   // Generate target URL for QR Code scanning
@@ -85,7 +145,7 @@ export default function TeacherDashboard({
   const qrUrlIn = getQRUrlForType('in');
   const qrUrlOut = getQRUrlForType('out');
 
-  // Print QR Code helper
+  // Helper function to print QR flyers
   const handlePrintQR = (type: 'in' | 'out' = 'in') => {
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
@@ -188,38 +248,10 @@ export default function TeacherDashboard({
         </body>
       </html>
     `);
-    
     printWindow.document.close();
   };
 
-  // Export Records as CSV
-  const handleExportCSV = () => {
-    if (records.length === 0) return;
-    
-    // Headers
-    const headers = ['Student Name', 'Section', 'Arrive Date', 'Arrive Time', 'Status', 'Timestamp'];
-    const rows = records.map(r => [
-      r.studentName,
-      r.sectionName,
-      r.date,
-      r.time,
-      r.status,
-      r.timestamp
-    ]);
-
-    const csvContent = "data:text/csv;charset=utf-8," 
-      + [headers.join(','), ...rows.map(e => e.map(val => `"${val.replace(/"/g, '""')}"`).join(','))].join('\n');
-      
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `Attendance_Records_${new Date().toISOString().slice(0,10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  // Filter records
+  // Filter attendance records based on current search and filter criteria
   const filteredRecords = records.filter(record => {
     const matchesSearch = record.studentName.toLowerCase().includes(recordSearch.toLowerCase());
     const matchesSection = recordSectionFilter === 'all' || record.sectionId === recordSectionFilter;
@@ -228,7 +260,7 @@ export default function TeacherDashboard({
     return matchesSearch && matchesSection && matchesStatus && matchesDate;
   });
 
-  // Calculate statistics
+  // Calculate statistics metrics
   const totalLogs = records.length;
   const lateLogs = records.filter(r => r.status === 'Late').length;
   const presentLogs = totalLogs - lateLogs;
@@ -252,9 +284,7 @@ export default function TeacherDashboard({
           id="tab-btn-qr"
           onClick={() => setActiveTab('qr')}
           className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-            activeTab === 'qr'
-              ? 'bg-indigo-50 text-indigo-700 shadow-xs border-l-4 border-indigo-600'
-              : 'text-gray-600 hover:bg-gray-50'
+            activeTab === 'qr' ? 'bg-indigo-50 text-indigo-700 shadow-xs border-l-4 border-indigo-600' : 'text-gray-600 hover:bg-gray-50'
           }`}
         >
           <QrCode size={18} />
@@ -265,9 +295,7 @@ export default function TeacherDashboard({
           id="tab-btn-sections"
           onClick={() => setActiveTab('sections')}
           className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-            activeTab === 'sections'
-              ? 'bg-indigo-50 text-indigo-700 shadow-xs border-l-4 border-indigo-600'
-              : 'text-gray-600 hover:bg-gray-50'
+            activeTab === 'sections' ? 'bg-indigo-50 text-indigo-700 shadow-xs border-l-4 border-indigo-600' : 'text-gray-600 hover:bg-gray-50'
           }`}
         >
           <Users size={18} />
@@ -278,9 +306,7 @@ export default function TeacherDashboard({
           id="tab-btn-records"
           onClick={() => setActiveTab('records')}
           className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-            activeTab === 'records'
-              ? 'bg-indigo-50 text-indigo-700 shadow-xs border-l-4 border-indigo-600'
-              : 'text-gray-600 hover:bg-gray-50'
+            activeTab === 'records' ? 'bg-indigo-50 text-indigo-700 shadow-xs border-l-4 border-indigo-600' : 'text-gray-600 hover:bg-gray-50'
           }`}
         >
           <FileSpreadsheet size={18} />
@@ -293,12 +319,12 @@ export default function TeacherDashboard({
         </button>
 
         <div className="pt-6 border-t border-gray-100 mt-6 space-y-4">
-          <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-xs text-amber-800 flex gap-2.5">
-            <Info size={16} className="text-amber-600 shrink-0 mt-0.5" />
+          <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3 text-xs text-indigo-800 flex gap-2.5">
+            <Info size={16} className="text-indigo-600 shrink-0 mt-0.5" />
             <div>
-              <p className="font-semibold">Student Accounts</p>
-              <p className="mt-1 text-amber-700/90 leading-normal">
-                Student accounts are created by an administrator. You can remove a student from your roster below, but new accounts must be added via the Admin Dashboard.
+              <p className="font-semibold">Student Management</p>
+              <p className="mt-1 text-indigo-700/90 leading-normal">
+                Expand any class section below to register new students directly into your roster.
               </p>
             </div>
           </div>
@@ -318,7 +344,7 @@ export default function TeacherDashboard({
       {/* Main Content Area */}
       <div id="teacher-main-content" className="lg:col-span-3 space-y-6">
         
-        {/* STATS OVERVIEW (Compact top banner) */}
+        {/* Statistics Banner Overview */}
         <div id="stats-banner" className="grid grid-cols-3 gap-4 bg-white/75 backdrop-blur-md p-4 rounded-2xl border border-gray-100 shadow-xs">
           <div className="text-center p-2 border-r border-gray-100">
             <span className="text-xs text-gray-500 block uppercase tracking-wider font-semibold">Total Logs</span>
@@ -361,10 +387,9 @@ export default function TeacherDashboard({
               </div>
             </div>
 
-            {/* DUAL QR CODES CARDS GRID */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               
-              {/* QR CARD 1: TIME IN (ARRIVAL) */}
+              {/* QR CARD 1: TIME IN (CHECK-IN) */}
               <div className="bg-gradient-to-br from-indigo-50/50 to-white border border-indigo-100/80 rounded-2xl p-6 flex flex-col justify-between space-y-6">
                 <div>
                   <div className="flex items-center justify-between">
@@ -374,24 +399,18 @@ export default function TeacherDashboard({
                     <span className="text-xs text-gray-400 font-medium font-mono">Type: In</span>
                   </div>
                   <h3 className="text-lg font-bold text-gray-900 mt-3">Time In QR Code</h3>
-                  <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-                    Designed for students arriving to class. Evaluation is based on designated start times to flag on-time or late arrivals.
-                  </p>
                 </div>
 
                 <div className="flex flex-col items-center py-2">
                   <button
                     type="button"
-                    title="Click to enlarge"
                     onClick={() => setEnlargedQR({
                       url: qrUrlIn,
                       title: 'Time In QR Code',
-                      subtitle: selectedSectionForQR === 'all' 
-                        ? 'Universal Code (All Sections)' 
-                        : (sections.find(s => s.id === selectedSectionForQR)?.name || 'Class Specific'),
+                      subtitle: selectedSectionForQR === 'all' ? 'Universal Code (All Sections)' : (sections.find(s => s.id === selectedSectionForQR)?.name || 'Class Specific'),
                       type: 'in'
                     })}
-                    className="bg-white p-4 rounded-2xl shadow-xs border border-gray-100 cursor-pointer hover:scale-105 hover:shadow-md transition duration-200 group"
+                    className="bg-white p-4 rounded-2xl shadow-xs border border-gray-100 cursor-pointer hover:scale-105 transition duration-200 group"
                   >
                     <QRCodeSVG 
                       id="attendance-qr-svg"
@@ -404,18 +423,9 @@ export default function TeacherDashboard({
                       🔎 Click to Enlarge Code
                     </span>
                   </button>
-                  <span className="text-[11px] font-semibold text-gray-600 mt-3 font-mono bg-white px-3 py-1 rounded-full border border-gray-100">
-                    {selectedSectionForQR === 'all' 
-                      ? 'Universal Link' 
-                      : `${sections.find(s => s.id === selectedSectionForQR)?.name || 'Class'} (Arrival)`}
-                  </span>
                 </div>
 
                 <div className="space-y-3">
-                  <div className="bg-white/80 border border-gray-100 rounded-xl p-3">
-                    <span className="text-[10px] font-bold text-gray-400 block uppercase tracking-wider">Entry Link:</span>
-                    <code className="text-[10px] font-mono break-all text-gray-600 select-all block mt-0.5">{qrUrlIn}</code>
-                  </div>
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       id="btn-print-qr-in"
@@ -437,7 +447,7 @@ export default function TeacherDashboard({
                 </div>
               </div>
 
-              {/* QR CARD 2: TIME OUT (DEPARTURE) */}
+              {/* QR CARD 2: TIME OUT (CHECK-OUT) */}
               <div className="bg-gradient-to-br from-rose-50/50 to-white border border-rose-100/80 rounded-2xl p-6 flex flex-col justify-between space-y-6">
                 <div>
                   <div className="flex items-center justify-between">
@@ -447,24 +457,18 @@ export default function TeacherDashboard({
                     <span className="text-xs text-gray-400 font-medium font-mono">Type: Out</span>
                   </div>
                   <h3 className="text-lg font-bold text-gray-900 mt-3">Time Out QR Code</h3>
-                  <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-                    Designed for students leaving class or checking out. Helps monitor who left and records their precise checkout times.
-                  </p>
                 </div>
 
                 <div className="flex flex-col items-center py-2">
                   <button
                     type="button"
-                    title="Click to enlarge"
                     onClick={() => setEnlargedQR({
                       url: qrUrlOut,
                       title: 'Time Out QR Code',
-                      subtitle: selectedSectionForQR === 'all' 
-                        ? 'Universal Code (All Sections)' 
-                        : (sections.find(s => s.id === selectedSectionForQR)?.name || 'Class Specific'),
+                      subtitle: selectedSectionForQR === 'all' ? 'Universal Code (All Sections)' : (sections.find(s => s.id === selectedSectionForQR)?.name || 'Class Specific'),
                       type: 'out'
                     })}
-                    className="bg-white p-4 rounded-2xl shadow-xs border border-gray-100 cursor-pointer hover:scale-105 hover:shadow-md transition duration-200 group"
+                    className="bg-white p-4 rounded-2xl shadow-xs border border-gray-100 cursor-pointer hover:scale-105 transition duration-200 group"
                   >
                     <QRCodeSVG 
                       id="departure-qr-svg"
@@ -477,18 +481,9 @@ export default function TeacherDashboard({
                       🔎 Click to Enlarge Code
                     </span>
                   </button>
-                  <span className="text-[11px] font-semibold text-gray-600 mt-3 font-mono bg-white px-3 py-1 rounded-full border border-gray-100">
-                    {selectedSectionForQR === 'all' 
-                      ? 'Universal Link' 
-                      : `${sections.find(s => s.id === selectedSectionForQR)?.name || 'Class'} (Departure)`}
-                  </span>
                 </div>
 
                 <div className="space-y-3">
-                  <div className="bg-white/80 border border-gray-100 rounded-xl p-3">
-                    <span className="text-[10px] font-bold text-gray-400 block uppercase tracking-wider">Exit Link:</span>
-                    <code className="text-[10px] font-mono break-all text-gray-600 select-all block mt-0.5">{qrUrlOut}</code>
-                  </div>
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       id="btn-print-qr-out"
@@ -511,26 +506,14 @@ export default function TeacherDashboard({
               </div>
 
             </div>
-
-            {/* General instructions bar */}
-            <div className="bg-gray-50 rounded-2xl p-4 border border-gray-100 flex items-start gap-3">
-              <Sparkles className="text-indigo-500 mt-0.5 shrink-0" size={16} />
-              <div className="text-xs text-gray-600 leading-relaxed">
-                <p className="font-bold text-gray-800">Presentation Tip</p>
-                <p className="mt-0.5 text-gray-500">
-                  Project these codes on your classroom screen. Students can scan their device camera directly from the screen while remaining seated. The Time Out code is perfect to present during the last 5 minutes of class for efficient dismissal!
-                </p>
-              </div>
-            </div>
-
           </div>
         )}
 
-        {/* TAB 2: CLASS LIST & SECTIONS CUSTOMIZATION */}
+        {/* TAB 2: CLASS LIST & SECTIONS MANAGEMENT */}
         {activeTab === 'sections' && (
           <div id="tab-pane-sections" className="space-y-6">
             
-            {/* Create new section and customize start time */}
+            {/* Create Section Form */}
             <div id="section-creator" className="bg-white rounded-2xl border border-gray-100 shadow-xs p-6">
               <h3 className="text-lg font-bold font-display text-gray-900 mb-4 flex items-center gap-2">
                 <Plus size={18} className="text-indigo-600" />
@@ -544,7 +527,7 @@ export default function TeacherDashboard({
                     id="input-section-name"
                     type="text"
                     required
-                    placeholder=" "
+                    placeholder=""
                     value={newSectionName}
                     onChange={(e) => setNewSectionName(e.target.value)}
                     className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
@@ -569,7 +552,7 @@ export default function TeacherDashboard({
                 <button
                   id="btn-add-section"
                   type="submit"
-                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-sm py-2.5 rounded-xl transition shadow-xs flex items-center justify-center gap-2 h-[42px]"
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-sm py-2.5 rounded-xl transition shadow-xs flex items-center justify-center gap-2 h-[42px] cursor-pointer"
                 >
                   <Plus size={16} />
                   <span>Create Class Section</span>
@@ -577,398 +560,370 @@ export default function TeacherDashboard({
               </form>
             </div>
 
-            {/* Class list preview (student accounts are created via the Admin Dashboard) */}
+            {/* Class List & Direct Student Account Creation */}
             <div id="student-list-manager" className="bg-white rounded-2xl border border-gray-100 shadow-xs p-6">
               <div id="section-lists-preview" className="space-y-4">
                 <h3 className="text-base font-bold text-gray-900">Current Class Lists</h3>
 
                 {sections.length === 0 ? (
                   <div className="text-center py-8 text-gray-400 text-sm">
-                    No sections created yet. Create a class section first!
+                    No class sections created yet. Create a section using the form above.
                   </div>
                 ) : (
-                  <div className="space-y-4 max-h-[420px] overflow-y-auto pr-1">
-                    {sections.map((section) => (
-                      <div key={section.id} id={`section-card-${section.id}`} className="border border-gray-100 rounded-xl p-4 bg-gray-50/50 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <span className="font-bold text-sm text-gray-800 block">{section.name}</span>
-                            <div className="flex items-center gap-1.5 mt-1">
-                              <span className="text-[10px] bg-indigo-50 text-indigo-700 font-medium px-2 py-0.5 rounded-md flex items-center gap-1">
-                                <Clock size={10} />
-                                Start Time: {formatTimeToAMPM(section.startTime)}
-                              </span>
-                              <span className="text-[10px] bg-gray-100 text-gray-600 font-medium px-2 py-0.5 rounded-md">
-                                {section.students.length} Students
-                              </span>
+                  <div className="space-y-4">
+                    {sections.map((section) => {
+                      const isExpanded = expandedSectionId === section.id;
+                      const studentCount = section.students?.length || 0;
+
+                      return (
+                        <div key={section.id} id={`section-card-${section.id}`} className="border border-gray-100 rounded-2xl p-5 bg-gray-50/50 space-y-4">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                            <div>
+                              <div className="flex items-center gap-3">
+                                <span className="font-bold text-base text-gray-900">{section.name}</span>
+                                <button
+                                  onClick={() => setExpandedSectionId(isExpanded ? null : section.id)}
+                                  className="flex items-center gap-1 text-xs bg-indigo-50 text-indigo-600 font-bold px-3 py-1 rounded-lg hover:bg-indigo-100 cursor-pointer"
+                                >
+                                  <UserPlus size={14} />
+                                  <span>{isExpanded ? 'Hide Form' : '+ Add / View Students'}</span>
+                                  {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                                </button>
+                              </div>
+
+                              <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
+                                <span className="flex items-center gap-1">
+                                  <Clock size={12} /> Start Time: {formatTimeToAMPM(section.startTime)}
+                                </span>
+                                <span>•</span>
+                                <span className="flex items-center gap-1">
+                                  <Users size={12} /> {studentCount} {studentCount === 1 ? 'Student' : 'Students'}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="time"
+                                value={section.startTime}
+                                onChange={(e) => onUpdateSectionTime(section.id, e.target.value)}
+                                className="bg-white border border-gray-200 text-xs rounded-lg px-2.5 py-1.5 text-gray-800 font-medium"
+                              />
+                              <button
+                                id={`btn-delete-section-${section.id}`}
+                                onClick={() => {
+                                  if (confirm(`Are you sure you want to delete section ${section.name}?`)) {
+                                    onDeleteSection(section.id);
+                                  }
+                                }}
+                                className="p-2 text-gray-400 hover:text-rose-600 transition cursor-pointer"
+                                title="Delete Class Section"
+                              >
+                                <Trash2 size={16} />
+                              </button>
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="time"
-                              value={section.startTime}
-                              onChange={(e) => onUpdateSectionTime(section.id, e.target.value)}
-                              title="Update start time"
-                              className="bg-white border border-gray-200 text-xs rounded-md px-1.5 py-0.5 w-[75px] focus:outline-none focus:border-indigo-500"
-                            />
-                            <button
-                              id={`btn-delete-section-${section.id}`}
-                              onClick={() => {
-                                if (confirm(`Are you sure you want to delete ${section.name}? This will also delete all students in this section.`)) {
-                                  onDeleteSection(section.id);
-                                }
-                              }}
-                              className="text-gray-400 hover:text-rose-600 p-1 rounded-lg hover:bg-rose-50 transition"
-                              title="Delete Class Section"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* List of students */}
-                        {section.students.length === 0 ? (
-                          <p className="text-xs text-gray-400 italic">No students in this class yet. Ask an admin to create student accounts for this section.</p>
-                        ) : (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1.5">
-                            {section.students.map((student) => (
-                              <div
-                                key={student.id}
-                                id={`student-badge-${student.id}`}
-                                className="flex items-center justify-between bg-white border border-gray-100 rounded-xl px-3 py-2 text-xs text-gray-700 group hover:border-indigo-200 hover:shadow-2xs transition"
+                          {/* EXPANDED SECTION: TEACHER STUDENT CREATION FORM & ROSTER */}
+                          {isExpanded && (
+                            <div className="border-t border-gray-200/60 pt-4 space-y-4">
+                              <form
+                                onSubmit={(e) => handleAddStudent(e, section.id)}
+                                className="bg-white p-4 rounded-xl border border-gray-200 space-y-3"
                               >
-                                <div className="flex items-center gap-2 min-w-0">
-                                  {/* Student Photo */}
-                                  <div className="relative group/photo shrink-0">
-                                    {student.photoUrl ? (
-                                      <img 
-                                        src={student.photoUrl} 
-                                        alt={student.name} 
-                                        referrerPolicy="no-referrer"
-                                        className="w-7 h-7 rounded-full object-cover border border-gray-200" 
-                                      />
-                                    ) : (
-                                      <div className="w-7 h-7 rounded-full bg-gray-50 border border-gray-200 flex items-center justify-center text-gray-400">
-                                        <span className="text-[9px] font-bold font-mono">ID</span>
-                                      </div>
-                                    )}
-                                    {/* Upload/Overlay trigger on hover */}
-                                    <label className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover/photo:opacity-100 transition cursor-pointer text-[8px] text-white font-bold font-mono">
-                                      <span>UP</span>
-                                      <input
-                                        type="file"
-                                        accept="image/*"
-                                        className="hidden"
-                                        onChange={(e) => {
-                                          const file = e.target.files?.[0];
-                                          if (file) {
-                                            if (file.size > 2 * 1024 * 1024) {
-                                              alert('File is too large. Max is 2MB.');
-                                              return;
-                                            }
-                                            const reader = new FileReader();
-                                            reader.onloadend = () => {
-                                              if (typeof reader.result === 'string' && onUpdateStudentPhoto) {
-                                                onUpdateStudentPhoto(section.id, student.id, reader.result);
-                                              }
-                                            };
-                                            reader.readAsDataURL(file);
-                                          }
-                                        }}
-                                      />
-                                    </label>
+                                <h4 className="text-xs font-bold text-indigo-600 uppercase tracking-wider flex items-center gap-1.5">
+                                  <UserPlus size={14} />
+                                  <span>Register Student to {section.name}</span>
+                                </h4>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                  <div>
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Full Name</label>
+                                    <input
+                                      type="text"
+                                      required
+                                      placeholder="Juan Dela Cruz"
+                                      value={studentName}
+                                      onChange={(e) => setStudentName(e.target.value)}
+                                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs font-medium text-gray-900"
+                                    />
                                   </div>
-                                  <div className="min-w-0">
-                                    <span className="font-bold block truncate text-gray-800" title={student.name}>{student.name}</span>
-                                    {student.photoUrl && (
+
+                                  <div>
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Username</label>
+                                    <input
+                                      type="text"
+                                      required
+                                      placeholder="juan123"
+                                      value={studentUsername}
+                                      onChange={(e) => setStudentUsername(e.target.value)}
+                                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs font-medium text-gray-900"
+                                    />
+                                  </div>
+
+                                  <div className="relative">
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Password</label>
+                                    <div className="relative">
+                                      <input
+                                        type={showPassword ? 'text' : 'password'}
+                                        required
+                                        placeholder="••••••••"
+                                        value={studentPassword}
+                                        onChange={(e) => setStudentPassword(e.target.value)}
+                                        className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 pr-8 text-xs font-medium text-gray-900"
+                                      />
                                       <button
                                         type="button"
-                                        onClick={() => onUpdateStudentPhoto && onUpdateStudentPhoto(section.id, student.id, '')}
-                                        className="text-[9px] text-rose-500 hover:text-rose-700 font-bold block"
+                                        onClick={() => setShowPassword(!showPassword)}
+                                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                                       >
-                                        Remove Photo
+                                        {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
                                       </button>
-                                    )}
+                                    </div>
                                   </div>
                                 </div>
-                                <button
-                                  id={`btn-delete-student-${student.id}`}
-                                  onClick={() => onDeleteStudent(section.id, student.id)}
-                                  className="text-gray-300 hover:text-rose-600 p-1 hover:bg-gray-50 rounded-md transition"
-                                  title="Delete Student"
-                                >
-                                  <Trash2 size={13} />
-                                </button>
+
+                                <div className="flex justify-end pt-1">
+                                  <button
+                                    type="submit"
+                                    disabled={isSubmittingStudent}
+                                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2 rounded-lg transition flex items-center gap-1.5 cursor-pointer"
+                                  >
+                                    <UserPlus size={14} />
+                                    <span>{isSubmittingStudent ? 'Creating...' : 'Save Student Account'}</span>
+                                  </button>
+                                </div>
+                              </form>
+
+                              {/* Student Roster List */}
+                              <div className="space-y-2">
+                                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Registered Roster</h4>
+
+                                {studentCount === 0 ? (
+                                  <p className="text-xs text-gray-400 italic">No students registered in this section yet. Use the form above to add students.</p>
+                                ) : (
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                                    {section.students?.map((st) => (
+                                      <div
+                                        key={st.id}
+                                        id={`student-badge-${st.id}`}
+                                        className="flex items-center justify-between p-2.5 bg-white border border-gray-200 rounded-xl text-xs"
+                                      >
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-7 h-7 rounded-full bg-indigo-50 text-indigo-600 font-bold flex items-center justify-center uppercase">
+                                            {st.name.charAt(0)}
+                                          </div>
+                                          <div>
+                                            <span className="font-bold text-gray-900 block">{st.name}</span>
+                                            <span className="text-[10px] text-gray-400 font-mono">@{st.username}</span>
+                                          </div>
+                                        </div>
+
+                                        <button
+                                          onClick={() => onDeleteStudent(section.id, st.id)}
+                                          className="text-gray-400 hover:text-rose-600 p-1 cursor-pointer"
+                                          title="Remove Student"
+                                        >
+                                          <Trash2 size={14} />
+                                        </button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                            </div>
+                          )}
+
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
-
             </div>
-
           </div>
         )}
 
-        {/* TAB 3: ATTENDANCE RECORDS LOGS */}
+        {/* TAB 3: ATTENDANCE RECORDS */}
         {activeTab === 'records' && (
-          <div id="tab-pane-records" className="bg-white rounded-2xl border border-gray-100 shadow-xs p-6 space-y-6">
-            
-            {/* Header & Export/Clear Controls */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-100 pb-4">
+          <div id="tab-pane-records" className="bg-white rounded-3xl border border-gray-100 shadow-xs p-6 sm:p-8 space-y-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-gray-100 pb-5 gap-4">
               <div>
-                <h2 className="text-xl font-bold font-display text-gray-900">Attendance Log Registry</h2>
-                <p className="text-sm text-gray-500 mt-1">Review student arrival times and status indicators.</p>
+                <h2 className="text-2xl font-bold font-display text-gray-900 tracking-tight">Attendance Records</h2>
+                <p className="text-sm text-gray-500 mt-1">Filter, review, and export student attendance logs.</p>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
                 <button
-                  id="btn-export-csv"
-                  onClick={handleExportCSV}
+                  onClick={() => {
+                    if (records.length === 0) return;
+                    const headers = ['Student Name', 'Section', 'Arrive Date', 'Arrive Time', 'Status', 'Timestamp'];
+                    const rows = records.map(r => [r.studentName, r.sectionName, r.date, r.time, r.status, r.timestamp]);
+                    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows.map(e => e.map(val => `"${val.replace(/"/g, '""')}"`).join(','))].join('\n');
+                    const link = document.createElement("a");
+                    link.setAttribute("href", encodeURI(csvContent));
+                    link.setAttribute("download", `Attendance_Records_${new Date().toISOString().slice(0,10)}.csv`);
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                  }}
                   disabled={records.length === 0}
-                  className="flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 disabled:opacity-40 text-gray-700 font-medium text-xs px-3.5 py-2 rounded-xl transition"
+                  className="flex items-center gap-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs px-4 py-2.5 rounded-xl transition cursor-pointer disabled:opacity-50"
                 >
-                  <Download size={14} />
-                  <span>CSV Export</span>
+                  <FileSpreadsheet size={16} />
+                  <span>Export CSV</span>
                 </button>
                 <button
-                  id="btn-clear-logs"
                   onClick={() => {
-                    if (confirm('Are you sure you want to permanently delete all attendance logs? This cannot be undone.')) {
+                    if (confirm('Are you sure you want to clear all attendance records?')) {
                       onClearRecords();
                     }
                   }}
                   disabled={records.length === 0}
-                  className="flex items-center gap-1.5 bg-rose-50 hover:bg-rose-100 disabled:opacity-40 text-rose-600 font-medium text-xs px-3.5 py-2 rounded-xl transition"
+                  className="flex items-center gap-2 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-xs px-4 py-2.5 rounded-xl transition cursor-pointer disabled:opacity-50"
                 >
-                  <Trash2 size={14} />
-                  <span>Clear Logs</span>
+                  <Trash2 size={16} />
+                  <span>Clear All</span>
                 </button>
               </div>
             </div>
 
-            {/* Filter controls */}
-            <div id="logs-filters" className="grid grid-cols-1 sm:grid-cols-4 gap-3 bg-gray-50 p-4 rounded-xl border border-gray-100">
-              
-              {/* Search */}
-              <div className="space-y-1.5">
-                <label htmlFor="filter-search" className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Search Student</label>
-                <div className="relative">
-                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                  <input
-                    id="filter-search"
-                    type="text"
-                    placeholder="Search name..."
-                    value={recordSearch}
-                    onChange={(e) => setRecordSearch(e.target.value)}
-                    className="w-full bg-white border border-gray-200 rounded-lg pl-8 pr-3 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                  />
-                </div>
+            {/* Filter tools */}
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <div className="relative">
+                <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search student name..."
+                  value={recordSearch}
+                  onChange={(e) => setRecordSearch(e.target.value)}
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-10 pr-4 py-2 text-xs text-gray-800 focus:outline-none focus:border-indigo-500"
+                />
               </div>
 
-              {/* Class Section */}
-              <div className="space-y-1.5">
-                <label htmlFor="filter-section" className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Section</label>
-                <select
-                  id="filter-section"
-                  value={recordSectionFilter}
-                  onChange={(e) => setRecordSectionFilter(e.target.value)}
-                  className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                >
-                  <option value="all">All Sections</option>
-                  {sections.map(s => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
-              </div>
+              <select
+                value={recordSectionFilter}
+                onChange={(e) => setRecordSectionFilter(e.target.value)}
+                className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-800 focus:outline-none focus:border-indigo-500"
+              >
+                <option value="all">All Sections</option>
+                {sections.map(s => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
 
-              {/* Lateness Status */}
-              <div className="space-y-1.5">
-                <label htmlFor="filter-status" className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Status</label>
-                <select
-                  id="filter-status"
-                  value={recordStatusFilter}
-                  onChange={(e) => setRecordStatusFilter(e.target.value)}
-                  className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                >
-                  <option value="all">All Statuses</option>
-                  <option value="Present">Present (On Time)</option>
-                  <option value="Late">Late Arrival</option>
-                </select>
-              </div>
+              <select
+                value={recordStatusFilter}
+                onChange={(e) => setRecordStatusFilter(e.target.value)}
+                className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-800 focus:outline-none focus:border-indigo-500"
+              >
+                <option value="all">All Statuses</option>
+                <option value="Present">Present (On Time)</option>
+                <option value="Late">Late</option>
+              </select>
 
-              {/* Specific Date */}
-              <div className="space-y-1.5">
-                <label htmlFor="filter-date" className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Arrival Date</label>
-                <div className="relative">
-                  <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                  <input
-                    id="filter-date"
-                    type="date"
-                    value={recordDateFilter}
-                    onChange={(e) => setRecordDateFilter(e.target.value)}
-                    className="w-full bg-white border border-gray-200 rounded-lg pl-8 pr-3 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                  />
-                </div>
-              </div>
-
+              <input
+                type="date"
+                value={recordDateFilter}
+                onChange={(e) => setRecordDateFilter(e.target.value)}
+                className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-800 focus:outline-none focus:border-indigo-500"
+              />
             </div>
 
-            {/* Attendance Table */}
-            <div id="attendance-table-container" className="overflow-x-auto border border-gray-100 rounded-xl">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-gray-50/70 border-b border-gray-100 text-xs font-bold text-gray-500 uppercase tracking-wider">
-                    <th className="py-3 px-4">Student Name</th>
-                    <th className="py-3 px-4">Class Section</th>
-                    <th className="py-3 px-4">Arrive Date</th>
-                    <th className="py-3 px-4">Arrive Time</th>
-                    <th className="py-3 px-4">Status</th>
-                    <th className="py-3 px-4 text-right">Log Timestamp</th>
-                  </tr>
-                </thead>
-                <tbody className="text-xs text-gray-700 divide-y divide-gray-100">
-                  {filteredRecords.length === 0 ? (
+            {/* Attendance logs table */}
+            <div className="border border-gray-100 rounded-2xl overflow-hidden">
+              <div className="overflow-x-auto max-h-[400px]">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead className="bg-gray-50 text-gray-500 uppercase font-semibold sticky top-0 border-b border-gray-100">
                     <tr>
-                      <td colSpan={6} className="text-center py-10 text-gray-400 italic">
-                        No attendance logs match the current filters or no logs submitted yet.
-                      </td>
+                      <th className="p-3.5">Student Name</th>
+                      <th className="p-3.5">Section</th>
+                      <th className="p-3.5">Date</th>
+                      <th className="p-3.5">Time Logged</th>
+                      <th className="p-3.5">Status</th>
                     </tr>
-                  ) : (
-                    filteredRecords.map((record) => (
-                      <tr 
-                        key={record.id} 
-                        id={`log-row-${record.id}`} 
-                        className={`hover:bg-gray-50/50 transition-colors ${record.status === 'Late' ? 'bg-rose-50/10' : ''}`}
-                      >
-                        <td className="py-2.5 px-4 font-semibold text-gray-900">
-                          <div className="flex items-center gap-2.5">
-                            {record.studentPhotoUrl ? (
-                              <img 
-                                src={record.studentPhotoUrl} 
-                                alt={record.studentName} 
-                                referrerPolicy="no-referrer"
-                                className="w-7 h-7 rounded-full object-cover border border-gray-150 shadow-xs shrink-0" 
-                              />
-                            ) : (
-                              <div className="w-7 h-7 rounded-full bg-gray-50 border border-gray-150 flex items-center justify-center text-gray-400 font-mono text-[9px] font-bold shrink-0">
-                                ID
-                              </div>
-                            )}
-                            <span className="truncate max-w-[150px]">{record.studentName}</span>
-                          </div>
-                        </td>
-                        <td className="py-3.5 px-4 text-gray-600">{record.sectionName}</td>
-                        <td className="py-3.5 px-4 text-gray-600 font-mono">{record.date}</td>
-                        <td className="py-3.5 px-4 text-gray-600 font-mono font-medium">{record.time}</td>
-                        <td className="py-3.5 px-4">
-                          {record.status === 'Late' ? (
-                            <span className="inline-flex items-center gap-1 bg-rose-50 text-rose-700 font-bold px-2.5 py-0.5 rounded-full border border-rose-100">
-                              <AlertTriangle size={11} className="shrink-0" />
-                              <span>LATE</span>
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 font-semibold px-2.5 py-0.5 rounded-full border border-emerald-100">
-                              <CheckCircle size={11} className="shrink-0" />
-                              <span>On Time</span>
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-3.5 px-4 text-right text-gray-400 font-mono text-[11px]">
-                          {new Date(record.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {filteredRecords.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="text-center py-8 text-gray-400">
+                          No attendance records found matching filters.
                         </td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Table Footer Stats */}
-            <div className="flex items-center justify-between text-xs text-gray-500">
-              <p>Showing {filteredRecords.length} of {records.length} total logs</p>
-              <div className="flex gap-4">
-                <span>Present: <strong>{filteredRecords.filter(r => r.status === 'Present').length}</strong></span>
-                <span>Late: <strong className="text-rose-600">{filteredRecords.filter(r => r.status === 'Late').length}</strong></span>
+                    ) : (
+                      filteredRecords.map((rec) => (
+                        <tr key={rec.id} className="hover:bg-gray-50/50">
+                          <td className="p-3.5 font-bold text-gray-800">{rec.studentName}</td>
+                          <td className="p-3.5 text-gray-600">{rec.sectionName}</td>
+                          <td className="p-3.5 text-gray-600">{rec.date}</td>
+                          <td className="p-3.5 font-mono text-gray-600">{rec.time}</td>
+                          <td className="p-3.5">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full font-bold text-[10px] ${
+                              rec.status === 'Late' ? 'bg-rose-100 text-rose-700' : 'bg-green-100 text-green-700'
+                            }`}>
+                              {rec.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
-
           </div>
         )}
 
       </div>
 
-      {/* FULL-SCREEN INTERACTIVE ENLARGED QR LIGHTBOX */}
+      {/* Enlarged QR Code Modal */}
       <AnimatePresence>
         {enlargedQR && (
-          <div 
-            id="qr-lightbox-overlay" 
-            className="fixed inset-0 bg-black/90 backdrop-blur-md flex flex-col items-center justify-center p-4 z-[9999]"
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
             onClick={() => setEnlargedQR(null)}
           >
             <motion.div
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white rounded-3xl max-w-md w-full p-8 text-center space-y-6 relative border border-gray-100 shadow-2xl"
+              className="bg-white rounded-3xl p-8 max-w-md w-full text-center space-y-6 shadow-2xl relative"
               onClick={(e) => e.stopPropagation()}
             >
-              <button
-                id="btn-close-lightbox"
-                type="button"
-                onClick={() => setEnlargedQR(null)}
-                className="absolute top-4 right-4 bg-gray-100 hover:bg-gray-200 text-gray-500 rounded-full w-8 h-8 flex items-center justify-center transition cursor-pointer font-bold"
-              >
-                ✕
-              </button>
-
-              <div className="space-y-1">
-                <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider ${
+              <div>
+                <span className={`inline-block text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider mb-2 ${
                   enlargedQR.type === 'out' ? 'bg-rose-100 text-rose-700' : 'bg-indigo-100 text-indigo-700'
                 }`}>
-                  {enlargedQR.type === 'out' ? 'Class Departure / Check-Out' : 'Class Arrival / Check-In'}
+                  {enlargedQR.title}
                 </span>
-                <h3 className="text-2xl font-black text-gray-900 tracking-tight">{enlargedQR.title}</h3>
-                <p className="text-xs text-gray-500 font-semibold">{enlargedQR.subtitle}</p>
+                <h3 className="text-xl font-bold text-gray-900">{enlargedQR.subtitle}</h3>
+                <p className="text-xs text-gray-500 mt-1">Scan using smartphone camera to access portal.</p>
               </div>
 
-              <div className="bg-white p-4 rounded-2xl inline-block border border-gray-100 shadow-lg mx-auto">
-                <QRCodeSVG 
-                  id={enlargedQR.type === 'out' ? 'departure-qr-svg-large' : 'attendance-qr-svg-large'}
-                  value={enlargedQR.url} 
-                  size={260}
-                  level="H"
-                  includeMargin={true}
-                />
+              <div className="bg-gray-50 p-6 rounded-2xl border border-gray-100 inline-block mx-auto">
+                <QRCodeSVG value={enlargedQR.url} size={260} level="H" includeMargin={true} />
               </div>
 
-              <div className="space-y-2">
-                <p className="text-xs font-bold text-gray-700">Scan code with phone camera to log instant status</p>
-                <div className="bg-gray-50 rounded-xl p-3 max-w-sm mx-auto border border-gray-100">
-                  <span className="text-[10px] font-bold text-gray-400 block uppercase tracking-wider">Target Address:</span>
-                  <code className="text-[10px] font-mono text-gray-500 break-all select-all">{enlargedQR.url}</code>
-                </div>
-              </div>
-
-              <div className="pt-2">
+              <div className="flex gap-2">
                 <button
-                  id="btn-lightbox-done"
-                  type="button"
-                  onClick={() => setEnlargedQR(null)}
-                  className={`w-full py-3 font-bold text-sm text-white rounded-xl shadow-xs transition ${
-                    enlargedQR.type === 'out' ? 'bg-rose-600 hover:bg-rose-700' : 'bg-indigo-600 hover:bg-indigo-700'
-                  }`}
+                  onClick={() => handlePrintQR(enlargedQR.type)}
+                  className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-3 rounded-xl transition cursor-pointer flex items-center justify-center gap-2"
                 >
-                  Done & Close Projection
+                  <Download size={16} />
+                  <span>Print Flyer</span>
+                </button>
+                <button
+                  onClick={() => setEnlargedQR(null)}
+                  className="px-5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl transition cursor-pointer"
+                >
+                  Close
                 </button>
               </div>
             </motion.div>
-          </div>
+          </motion.div>
         )}
       </AnimatePresence>
 
