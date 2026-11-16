@@ -2,12 +2,17 @@ import express from 'express';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { PrismaClient } from '@prisma/client';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const prisma = new PrismaClient({
   datasources: {
     db: {
-      url: "postgresql://attendance_db_qrsystem_user:FDIfou3fFAiLpUhrYrjI90g8vkGmyqaw@dpg-dbas7mss728c739frua0-a.oregon-postgres.render.com/attendance_db_qrsystem?sslmode=require&connect_timeout=30&pool_timeout=30",
+      url: process.env.DATABASE_URL || "postgresql://attendance_db_qrsystem_user:FDIfou3fFAiLpUhrYrjI90g8vkGmyqaw@dpg-dbas7mss728c739frua0-a.oregon-postgres.render.com/attendance_db_qrsystem?sslmode=require&connect_timeout=30&pool_timeout=30",
     },
   },
 });
@@ -46,7 +51,7 @@ async function seedAdmin() {
   }
 }
 
-async function findSectionFlexible(identifier: string) {
+async function findSectionFlexible(identifier) {
   if (!identifier) return null;
   let section = await prisma.section.findUnique({
     where: { id: identifier },
@@ -62,24 +67,7 @@ async function findSectionFlexible(identifier: string) {
   return section;
 }
 
-async function getStudentsForSection(identifier: string) {
-  const section = await findSectionFlexible(identifier);
-  if (section && section.students) {
-    return section.students;
-  }
-  const students = await prisma.student.findMany({
-    where: {
-      OR: [
-        { sectionId: identifier },
-        { section: { name: { equals: identifier, mode: 'insensitive' } } }
-      ]
-    },
-    include: { records: true }
-  }).catch(() => []);
-  return students;
-}
-
-// UNIFIED LOGIN ROUTE (Checks Teachers/Admin FIRST, then checks Students automatically)
+// UNIFIED LOGIN ROUTE
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -171,7 +159,7 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-const handleStudentLoginRequest = async (req: any, res: any) => {
+const handleStudentLoginRequest = async (req, res) => {
   try {
     const { username, password } = req.body;
     if (!username || !password) {
@@ -238,7 +226,7 @@ app.get('/api/auth/me', async (req, res) => {
     if (!authHeader) return res.status(401).json({ success: false, error: 'No token provided' });
 
     const token = authHeader.split(' ')[1];
-    const decoded: any = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET);
 
     if (decoded.role === 'student') {
       const student = await prisma.student.findUnique({ 
@@ -282,7 +270,7 @@ app.get('/api/auth/me', async (req, res) => {
   }
 });
 
-// PUBLIC STATE ENDPOINT (Includes teachers and sections for StudentPortal dropdowns)
+// PUBLIC STATE ENDPOINT
 app.get('/api/state/public', async (req, res) => {
   try {
     const teachersFromDb = await prisma.teacher.findMany({
@@ -297,8 +285,8 @@ app.get('/api/state/public', async (req, res) => {
     });
 
     const teachers = teachersFromDb
-      .filter((t: any) => t.username.toLowerCase() !== 'admin')
-      .map((t: any) => ({
+      .filter((t) => t.username.toLowerCase() !== 'admin')
+      .map((t) => ({
         id: t.id,
         name: t.name,
         username: t.username,
@@ -307,7 +295,7 @@ app.get('/api/state/public', async (req, res) => {
         subject: t.subject || null,
         photo: t.photo || null,
         sectionCount: t.sections ? t.sections.length : 0,
-        sections: t.sections ? t.sections.filter(Boolean).map((s: any) => ({
+        sections: t.sections ? t.sections.filter(Boolean).map((s) => ({
           id: s.id || s.name,
           name: s.name || s.id,
           teacherName: t.name,
@@ -348,8 +336,8 @@ app.get('/api/admin/teachers', async (req, res) => {
     });
 
     const teachers = teachersFromDb
-      .filter((t: any) => t.username.toLowerCase() !== 'admin')
-      .map((t: any) => ({
+      .filter((t) => t.username.toLowerCase() !== 'admin')
+      .map((t) => ({
         id: t.id,
         name: t.name,
         username: t.username,
@@ -358,7 +346,7 @@ app.get('/api/admin/teachers', async (req, res) => {
         subject: t.subject || null,
         photo: t.photo || null,
         sectionCount: t.sections ? t.sections.length : 0,
-        sections: t.sections ? t.sections.filter(Boolean).map((s: any) => ({
+        sections: t.sections ? t.sections.filter(Boolean).map((s) => ({
           id: s.id || s.name,
           name: s.name || s.id,
           teacherName: t.name,
@@ -395,12 +383,12 @@ app.post('/api/admin/teachers', async (req, res) => {
     });
 
     res.json({ success: true, teacher: newTeacher });
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({ success: false, error: error.message || 'Server error' });
   }
 });
 
-// --- GIDUGANG NAKO DINHI ANG DELETE TEACHER ENDPOINT (NO CHANGES SA UBANG CODE) ---
+// DELETE TEACHER ENDPOINT
 app.delete('/api/admin/teachers/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -419,7 +407,6 @@ app.delete('/api/admin/teachers/:id', async (req, res) => {
       return res.status(403).json({ success: false, error: 'Cannot delete the default administrator account' });
     }
 
-    // Limpyohan ang mga sections nga na-assign ilalom sa maong teacher una i-delete
     await prisma.section.deleteMany({
       where: { teacherId: teacherId }
     });
@@ -429,7 +416,7 @@ app.delete('/api/admin/teachers/:id', async (req, res) => {
     });
 
     res.json({ success: true, message: 'Teacher deleted successfully' });
-  } catch (error: any) {
+  } catch (error) {
     console.error('🔥 Error deleting teacher:', error);
     res.status(500).json({ success: false, error: error.message || 'Failed to delete teacher' });
   }
@@ -463,7 +450,7 @@ app.post('/api/teacher/students', async (req, res) => {
     });
 
     res.json({ success: true, student: newStudent });
-  } catch (error: any) {
+  } catch (error) {
     console.error('🔥 Error enrolling student:', error);
     res.status(500).json({ success: false, error: error.message || 'Failed to enroll student' });
   }
@@ -473,7 +460,15 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', message: 'API is running smoothly' });
 });
 
-const PORT = 5001;
+// --- RENDER STATIC FILES & SPA FALLBACK (FIXED) ---
+app.use(express.static(__dirname));
+
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// --- DYNAMIC PORT FOR RENDER ---
+const PORT = process.env.PORT || 5001;
 app.listen(PORT, async () => {
   await seedAdmin();
   console.log(`🚀 Server running on port ${PORT} smoothly!`);
