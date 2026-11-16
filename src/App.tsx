@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import AboutUs from './components/AboutUs';
 import { Section, AttendanceRecord, AuthUser } from './types';
 import TeacherDashboard from './components/TeacherDashboard';
 import StudentPortal from './components/StudentPortal';
@@ -6,40 +7,50 @@ import LoginPage from './components/LoginPage';
 import AdminDashboard from './components/AdminDashboard';
 import StudentAttendanceHistory from './components/StudentAttendanceHistory';
 import { apiFetch } from './lib/api';
-import { 
-  Sun, 
-  Moon, 
-  School, 
-  Lock, 
-  Unlock, 
-  User, 
-  Clock, 
-  Sparkles, 
+import {
+  Sun,
+  Moon,
+  School,
+  Lock,
+  Unlock,
+  User,
+  Clock,
   Settings,
   Eye,
-  EyeOff
+  EyeOff,
+  LoaderCircle,
+  Info,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
-type ViewName = 'checkin' | 'login' | 'admin' | 'teacher' | 'my-attendance';
+type ViewName =
+  | 'checkin'
+  | 'login'
+  | 'admin'
+  | 'teacher'
+  | 'my-attendance'
+  | 'about';
 
+// Helper function to map user roles to their respective view names
 function roleView(role: AuthUser['role']): ViewName {
   if (role === 'admin') return 'admin';
   if (role === 'teacher') return 'teacher';
   return 'my-attendance';
 }
 
-// Dark Mode Toggle Component with Sun & Moon Icons
+// Dark Mode Toggle Component
 function DarkModeToggle() {
   const [isDarkMode, setIsDarkMode] = useState(() => {
     return (
       localStorage.getItem('theme') === 'dark' ||
-      (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)
+      (!('theme' in localStorage) &&
+        window.matchMedia('(prefers-color-scheme: dark)').matches)
     );
   });
 
   useEffect(() => {
     const root = document.documentElement;
+
     if (isDarkMode) {
       root.classList.add('dark');
       localStorage.setItem('theme', 'dark');
@@ -53,97 +64,171 @@ function DarkModeToggle() {
     <button
       id="theme-toggle-btn"
       type="button"
-      onClick={() => setIsDarkMode(!isDarkMode)}
+      onClick={() => setIsDarkMode((prev) => !prev)}
       className="p-2.5 rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-100 border border-gray-300 dark:border-gray-700 hover:bg-gray-200 dark:hover:bg-gray-700 transition-all cursor-pointer flex items-center justify-center shrink-0 shadow-sm"
-      title={isDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+      title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
       aria-label="Toggle Theme"
     >
       {isDarkMode ? (
-        <Sun size={18} className="text-amber-400 fill-amber-400 shrink-0 block" />
+        <Sun
+          size={18}
+          className="text-amber-400 fill-amber-400 shrink-0 block"
+        />
       ) : (
-        <Moon size={18} className="text-slate-700 dark:text-slate-200 fill-slate-700 shrink-0 block" />
+        <Moon
+          size={18}
+          className="text-slate-700 dark:text-slate-200 fill-slate-700 shrink-0 block"
+        />
       )}
     </button>
   );
 }
 
-// Main App Component
 export default function App() {
-  // Publicly-visible sections for the anonymous check-in flow (all teachers)
   const [sections, setSections] = useState<Section[]>([]);
-
-  // Teacher-scoped data, only populated while logged in as a teacher
   const [teacherSections, setTeacherSections] = useState<Section[]>([]);
   const [teacherRecords, setTeacherRecords] = useState<AttendanceRecord[]>([]);
 
-  // Auth state
-  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
-  const [currentView, setCurrentView] = useState<ViewName>('checkin');
+  // Immediately initialize auth user from localStorage to prevent check-in flashing on reload
+  const [authUser, setAuthUser] = useState<AuthUser | null>(() => {
+    try {
+      const savedUser = localStorage.getItem('authUser');
+      return savedUser ? JSON.parse(savedUser) : null;
+    } catch (e) {
+      return null;
+    }
+  });
 
-  // Pre-selected section from QR code query parameter
-  const [preselectedSectionId, setPreselectedSectionId] = useState<string | null>(null);
+  // Immediately initialize current view based on saved user role if available
+  const [currentView, setCurrentView] = useState<ViewName>(() => {
+    try {
+      const savedUser = localStorage.getItem('authUser');
+      if (savedUser) {
+        const user = JSON.parse(savedUser);
+        return roleView(user.role);
+      }
+    } catch (e) {}
+    return 'checkin';
+  });
 
-  // Teacher "Configure Profile" modal state
+  const [preselectedSectionId, setPreselectedSectionId] =
+    useState<string | null>(null);
+
+  // Teacher security modal settings state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [newTeacherName, setNewTeacherName] = useState('');
-  const [newTeacherPhoto, setNewTeacherPhoto] = useState('');
-  const [newTeacherRoom, setNewTeacherRoom] = useState('');
-  const [newTeacherSubject, setNewTeacherSubject] = useState('');
+  const [newTeacherUsername, setNewTeacherUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
-  
-  // Password hide/unhide state for settings/forms
   const [showPassword, setShowPassword] = useState(false);
+  const [isSavingSecurity, setIsSavingSecurity] = useState(false);
 
-  // Live clock display state
   const [currentTime, setCurrentTime] = useState(new Date());
 
-  const fetchPublicState = async () => {
-    const { ok, data } = await apiFetch('/api/state/public');
-    if (ok && data.success) setSections(data.sections);
-  };
+  // ===================== PUBLIC STATE =====================
 
-  const fetchTeacherState = async () => {
-    const { ok, data } = await apiFetch('/api/state/teacher');
-    if (ok && data.success) {
-      setTeacherSections(data.sections);
-      setTeacherRecords(data.records);
+  const fetchPublicState = async () => {
+    try {
+      const { ok, data } = await apiFetch('/api/state/public');
+
+      if (ok && data.success) {
+        setSections(data.sections);
+      }
+    } catch (error) {
+      console.error('Failed to load public state:', error);
     }
   };
 
-  // On mount: restore session, load public check-in data, parse QR params
-  useEffect(() => {
-    apiFetch('/api/auth/me').then(({ data }) => {
-      if (data.success) {
-        setAuthUser(data.user);
-        setCurrentView(roleView(data.user.role));
+  // ===================== TEACHER STATE =====================
+
+  const fetchTeacherState = async () => {
+    try {
+      const { ok, data } = await apiFetch('/api/state/teacher');
+
+      if (ok && data.success) {
+        setTeacherSections(data.sections);
+        setTeacherRecords(data.records);
+
+        if (data.teacher) {
+          setAuthUser((prev) => {
+            if (!prev || prev.role !== 'teacher') return prev;
+
+            return {
+              ...prev,
+              ...data.teacher,
+              role: 'teacher',
+            };
+          });
+        }
       }
-    });
+    } catch (error) {
+      console.error('Failed to load teacher state:', error);
+    }
+  };
+
+  // ===================== INITIAL AUTHENTICATION & TOKEN VALIDATION =====================
+
+  useEffect(() => {
+    let active = true;
+
+    const initializeAuth = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) return;
+
+        // Verify token with backend server
+        const { ok, data } = await apiFetch('/api/auth/me');
+
+        if (!active || !ok || !data.success || !data.user) {
+          return;
+        }
+
+        setAuthUser(data.user);
+        localStorage.setItem('authUser', JSON.stringify(data.user));
+        setCurrentView(roleView(data.user.role));
+      } catch (error) {
+        console.error('Failed to restore session:', error);
+      }
+    };
+
+    initializeAuth();
 
     const params = new URLSearchParams(window.location.search);
     const sectionParam = params.get('sectionId');
-    if (sectionParam) setPreselectedSectionId(sectionParam);
+
+    if (sectionParam) {
+      setPreselectedSectionId(sectionParam);
+    }
+
+    return () => {
+      active = false;
+    };
   }, []);
 
-  // Poll the public check-in roster every 5 seconds
+  // Fetch public states periodically
   useEffect(() => {
     fetchPublicState();
-    const interval = setInterval(fetchPublicState, 5000);
-    return () => clearInterval(interval);
+    const interval = window.setInterval(fetchPublicState, 5000);
+    return () => window.clearInterval(interval);
   }, []);
 
-  // Poll the teacher's own scoped data while logged in as a teacher
+  // Fetch teacher states periodically if logged in as teacher
   useEffect(() => {
     if (authUser?.role !== 'teacher') return;
-    fetchTeacherState();
-    const interval = setInterval(fetchTeacherState, 5000);
-    return () => clearInterval(interval);
-  }, [authUser]);
 
-  // Live ticking clock
+    fetchTeacherState();
+    const interval = window.setInterval(fetchTeacherState, 5000);
+    return () => window.clearInterval(interval);
+  }, [authUser?.role]);
+
+  // Live classroom clock update timer
   useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
+    const timer = window.setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+
+    return () => window.clearInterval(timer);
   }, []);
+
+  // ===================== LOGIN / LOGOUT =====================
 
   const handleLoginSuccess = (user: AuthUser) => {
     setAuthUser(user);
@@ -156,69 +241,182 @@ export default function App() {
     } catch (error) {
       console.error('Logout error:', error);
     } finally {
-      // 1. Completely clear browser storage
+      // Clear local storage session credentials
       localStorage.removeItem('authUser');
       localStorage.removeItem('token');
-      localStorage.clear();
+      localStorage.removeItem('teacher_username');
 
-      // 2. Reset states
       setAuthUser(null);
       setTeacherSections([]);
       setTeacherRecords([]);
+      setIsSettingsOpen(false);
+      setNewPassword('');
+      setNewTeacherUsername('');
+      setShowPassword(false);
 
-      // 3. Redirect view to login page to display the 3 options
       setCurrentView('login');
     }
   };
 
-  // Core functions called by Teacher Dashboard
+  // ===================== SECTION MANAGEMENT =====================
+
   const handleAddSection = async (name: string, startTime: string) => {
-    const { ok, data } = await apiFetch('/api/sections', {
-      method: 'POST',
-      body: JSON.stringify({ name, startTime }),
-    });
-    if (ok) setTeacherSections(prev => [...prev, data.section]);
+    try {
+      const { ok, data } = await apiFetch('/api/sections', {
+        method: 'POST',
+        body: JSON.stringify({ name, startTime }),
+      });
+
+      if (ok) {
+        setTeacherSections((prev) => [...prev, data.section]);
+      } else {
+        alert(data.error || 'Failed to create section.');
+      }
+    } catch (error) {
+      console.error('Add section error:', error);
+      alert('Unable to create section. Please try again.');
+    }
   };
 
   const handleDeleteSection = async (id: string) => {
-    await apiFetch(`/api/sections/${id}`, { method: 'DELETE' });
-    setTeacherSections(prev => prev.filter(s => s.id !== id));
-    setTeacherRecords(prev => prev.filter(r => r.sectionId !== id));
-  };
+    try {
+      const { ok, data } = await apiFetch(`/api/sections/${id}`, {
+        method: 'DELETE',
+      });
 
-  const handleUpdateSectionTime = async (sectionId: string, startTime: string) => {
-    const { ok, data } = await apiFetch(`/api/sections/${sectionId}`, {
-      method: 'PUT',
-      body: JSON.stringify({ startTime }),
-    });
-    if (ok) setTeacherSections(prev => prev.map(s => (s.id === sectionId ? data.section : s)));
-  };
+      if (!ok) {
+        alert(data.error || 'Failed to delete section.');
+        return;
+      }
 
-  const handleDeleteStudent = async (sectionId: string, studentId: string) => {
-    await apiFetch(`/api/students/${studentId}`, { method: 'DELETE' });
-    setTeacherSections(prev =>
-      prev.map(s => (s.id === sectionId ? { ...s, students: s.students.filter(st => st.id !== studentId) } : s))
-    );
-  };
-
-  const handleUpdateStudentPhoto = async (sectionId: string, studentId: string, photoUrl: string) => {
-    await apiFetch('/api/student/photo', {
-      method: 'POST',
-      body: JSON.stringify({ studentId, photoUrl }),
-    });
-    const patch = (list: Section[]) =>
-      list.map(s =>
-        s.id === sectionId
-          ? { ...s, students: s.students.map(st => (st.id === studentId ? { ...st, photoUrl } : st)) }
-          : s
+      setTeacherSections((prev) => prev.filter((s) => s.id !== id));
+      setTeacherRecords((prev) =>
+        prev.filter((record) => record.sectionId !== id)
       );
-    setSections(patch);
-    setTeacherSections(patch);
+    } catch (error) {
+      console.error('Delete section error:', error);
+      alert('Unable to delete section.');
+    }
   };
+
+  const handleUpdateSectionTime = async (
+    sectionId: string,
+    startTime: string
+  ) => {
+    try {
+      const { ok, data } = await apiFetch(`/api/sections/${sectionId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ startTime }),
+      });
+
+      if (ok) {
+        setTeacherSections((prev) =>
+          prev.map((section) =>
+            section.id === sectionId ? data.section : section
+          )
+        );
+      } else {
+        alert(data.error || 'Failed to update section time.');
+      }
+    } catch (error) {
+      console.error('Update section time error:', error);
+      alert('Unable to update section time.');
+    }
+  };
+
+  // ===================== STUDENT MANAGEMENT =====================
+
+  const handleDeleteStudent = async (
+    sectionId: string,
+    studentId: string
+  ) => {
+    try {
+      const { ok, data } = await apiFetch(`/api/students/${studentId}`, {
+        method: 'DELETE',
+      });
+
+      if (!ok) {
+        alert(data.error || 'Failed to delete student.');
+        return;
+      }
+
+      setTeacherSections((prev) =>
+        prev.map((section) =>
+          section.id === sectionId
+            ? {
+                ...section,
+                students: section.students.filter(
+                  (student) => student.id !== studentId
+                ),
+              }
+            : section
+        )
+      );
+    } catch (error) {
+      console.error('Delete student error:', error);
+      alert('Unable to delete student.');
+    }
+  };
+
+  const handleUpdateStudentPhoto = async (
+    sectionId: string,
+    studentId: string,
+    photoUrl: string
+  ) => {
+    try {
+      const { ok, data } = await apiFetch('/api/student/photo', {
+        method: 'POST',
+        body: JSON.stringify({ studentId, photoUrl }),
+      });
+
+      if (!ok) {
+        alert(data.error || 'Failed to update student photo.');
+        return;
+      }
+
+      const patch = (list: Section[]) =>
+        list.map((section) =>
+          section.id === sectionId
+            ? {
+                ...section,
+                students: section.students.map((student) =>
+                  student.id === studentId
+                    ? { ...student, photoUrl }
+                    : student
+                ),
+              }
+            : section
+        );
+
+      setSections(patch);
+      setTeacherSections(patch);
+    } catch (error) {
+      console.error('Update student photo error:', error);
+      alert('Unable to update student photo.');
+    }
+  };
+
+  // ===================== ATTENDANCE =====================
 
   const handleClearRecords = async () => {
-    await apiFetch('/api/records/clear', { method: 'POST' });
-    setTeacherRecords([]);
+    if (!window.confirm('Are you sure you want to clear all attendance records?')) {
+      return;
+    }
+
+    try {
+      const { ok, data } = await apiFetch('/api/records/clear', {
+        method: 'POST',
+      });
+
+      if (ok) {
+        setTeacherRecords([]);
+      } else {
+        alert(data.error || 'Failed to clear attendance records.');
+      }
+    } catch (error) {
+      console.error('Clear records error:', error);
+      alert('Unable to clear attendance records.');
+    }
   };
 
   const handleSubmitAttendance = async (
@@ -229,17 +427,25 @@ export default function App() {
     date: string,
     time: string,
     type?: 'In' | 'Out'
-  ): Promise<{ status: 'Present' | 'Late' | 'Time Out'; startTime: string }> => {
-    const section = sections.find(s => s.id === sectionId);
+  ): Promise<{
+    status: 'Present' | 'Late' | 'Time Out';
+    startTime: string;
+  }> => {
+    const section = sections.find((s) => s.id === sectionId);
     const startTime = section?.startTime || '08:00';
 
     let status: 'Present' | 'Late' | 'Time Out' = 'Present';
+
     if (type === 'Out') {
       status = 'Time Out';
     } else {
       const [arrHours, arrMins] = time.split(':').map(Number);
       const [startHours, startMins] = startTime.split(':').map(Number);
-      status = arrHours * 60 + arrMins > startHours * 60 + startMins ? 'Late' : 'Present';
+
+      status =
+        arrHours * 60 + arrMins > startHours * 60 + startMins
+          ? 'Late'
+          : 'Present';
     }
 
     const newRecord: AttendanceRecord = {
@@ -256,101 +462,188 @@ export default function App() {
     };
 
     try {
-      await apiFetch('/api/records/add', { method: 'POST', body: JSON.stringify(newRecord) });
-    } catch (e) {
-      console.error(e);
+      const { ok, data } = await apiFetch('/api/records/add', {
+        method: 'POST',
+        body: JSON.stringify(newRecord),
+      });
+
+      if (!ok) {
+        console.error(
+          'Attendance was not saved:',
+          data.error || 'Unknown error'
+        );
+      }
+    } catch (error) {
+      console.error('Attendance request failed:', error);
     }
 
     return { status, startTime };
   };
 
-  const handleSaveProfile = async (e: React.FormEvent) => {
+  // ===================== TEACHER SECURITY SETTINGS =====================
+
+  const openSecuritySettings = () => {
+    if (authUser?.role !== 'teacher') return;
+
+    setNewTeacherUsername(authUser.username || '');
+    setNewPassword('');
+    setShowPassword(false);
+    setIsSettingsOpen(true);
+  };
+
+  const handleSaveProfile = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const trimmedPassword = newPassword.trim();
-    if (trimmedPassword && trimmedPassword.length < 4) {
-      alert('Password must be at least 4 characters if you wish to change it.');
+
+    if (authUser?.role !== 'teacher') return;
+
+    const trimmedUsername = newTeacherUsername.trim();
+    const passwordToSave = newPassword;
+
+    if (!trimmedUsername) {
+      alert('Please enter a username.');
       return;
     }
 
-    const { ok, data } = await apiFetch('/api/teacher/me', {
-      method: 'PUT',
-      body: JSON.stringify({
-        name: newTeacherName.trim(),
-        photo: newTeacherPhoto,
-        room: newTeacherRoom.trim(),
-        subject: newTeacherSubject.trim(),
-        ...(trimmedPassword ? { password: trimmedPassword } : {}),
-      }),
-    });
+    if (passwordToSave && passwordToSave.length < 4) {
+      alert('Password must be at least 4 characters.');
+      return;
+    }
 
-    if (ok) {
-      setAuthUser(prev => (prev && prev.role === 'teacher' ? { ...prev, ...data.teacher } : prev));
+    setIsSavingSecurity(true);
+
+    try {
+      const { ok, data } = await apiFetch('/api/teacher/me', {
+        method: 'PUT',
+        body: JSON.stringify({
+          username: trimmedUsername,
+          ...(passwordToSave ? { password: passwordToSave } : {}),
+        }),
+      });
+
+      if (!ok || !data.success) {
+        alert(data.error || 'Failed to save security settings.');
+        return;
+      }
+
+      const savedUsername =
+        data.teacher?.username || trimmedUsername;
+
+      setAuthUser((prev) => {
+        if (!prev || prev.role !== 'teacher') return prev;
+
+        return {
+          ...prev,
+          username: savedUsername,
+        };
+      });
+
+      localStorage.setItem('teacher_username', savedUsername);
+
       setIsSettingsOpen(false);
       setNewPassword('');
-    } else {
-      alert(data.error || 'Failed to save profile.');
+      setShowPassword(false);
+
+      alert(
+        'Security settings updated successfully. Use your new credentials the next time you log in.'
+      );
+    } catch (error) {
+      console.error('Security settings error:', error);
+      alert('An error occurred while saving security settings.');
+    } finally {
+      setIsSavingSecurity(false);
     }
   };
 
   const isTeacher = authUser?.role === 'teacher';
   const isStudent = authUser?.role === 'student';
+  const isPublicView = currentView === 'checkin' || currentView === 'login' || currentView === 'about';
 
   return (
-    <div id="app-root-container" className="min-h-screen bg-gray-50/70 dark:bg-gray-950 text-gray-800 dark:text-gray-100 font-sans flex flex-col antialiased transition-colors">
-
-      {/* 1. APP NAVBAR HEADER */}
-      <header id="app-navbar" className="bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800 py-4 px-4 sm:px-6 sticky top-0 z-40 backdrop-blur-md bg-white/90 dark:bg-gray-900/90 transition-colors">
+    <div
+      id="app-root-container"
+      className={`min-h-screen text-gray-800 dark:text-gray-100 font-sans flex flex-col antialiased transition-colors ${
+        isPublicView
+          ? 'bg-cover bg-center bg-no-repeat bg-fixed'
+          : 'bg-gray-50/70 dark:bg-gray-950'
+      }`}
+      style={
+        isPublicView
+          ? {
+              backgroundImage: `url('/900332001_2170304707029405_3282073779059589943_n.jpg')`,
+            }
+          : {}
+      }
+    >
+      <header
+        id="app-navbar"
+        className={`border-b border-gray-100/20 dark:border-gray-800/20 py-4 px-4 sm:px-6 sticky top-0 z-40 backdrop-blur-md transition-colors ${
+          isPublicView
+            ? 'bg-white/70 dark:bg-gray-900/70'
+            : 'bg-white dark:bg-gray-900'
+        }`}
+      >
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-
-          {/* Logo Brand */}
           <div className="flex items-center gap-3">
-            <div className="bg-indigo-600 p-2 rounded-xl text-white shadow-xs">
-              <School size={22} className="stroke-2" />
-            </div>
+          <div className="bg-white/10 p-1.5 rounded-xl border border-gray-200 dark:border-gray-700 flex items-center justify-center shrink-0">
+  <img 
+    src="/Ctulogo.jpg" 
+    alt="CTU Logo" 
+    className="w-10 h-10 object-contain rounded-lg" 
+  />
+</div>
+
             <div>
-              <span className="font-display font-black text-lg text-gray-900 dark:text-white tracking-tight block">KhlarEskwela</span>
+              <span className="font-display font-black text-lg text-gray-900 dark:text-white tracking-tight block">
+                EDULECTRICAL-ATTENDANCE-SYSTEM
+              </span>
+
               <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 mt-0.5">
                 <div className="flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
-                  <span className="text-[10px] text-gray-400 dark:text-gray-500 font-mono tracking-wider font-semibold uppercase">System Live</span>
+                  <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+                  <span className="text-[10px] text-gray-400 dark:text-gray-500 font-mono tracking-wider font-semibold uppercase">
+                    System Live
+                  </span>
                 </div>
-                {(isTeacher || isStudent) && (
-                  <>
-                    <span className="text-gray-300 dark:text-gray-700 text-[10px] hidden sm:inline">•</span>
-                    <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold uppercase tracking-wider font-mono flex items-center gap-1">
-                      {isTeacher && authUser && 'photo' in authUser && authUser.photo && (
-                        <img
-                          src={authUser.photo}
-                          alt={authUser.name}
-                          referrerPolicy="no-referrer"
-                          className="w-4 h-4 rounded-full object-cover border border-indigo-200"
-                        />
-                      )}
-                      {isTeacher ? `Teacher: ${(authUser as any).name}` : `Student: ${(authUser as any).name}`}
-                    </span>
-                  </>
-                )}
               </div>
             </div>
           </div>
 
-          {/* Clock Widget */}
-          <div id="live-clock-widget" className="hidden md:flex items-center gap-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl px-4 py-1.5 text-xs text-gray-500 dark:text-gray-400 font-mono font-medium shadow-xs">
+          <div
+            id="live-clock-widget"
+            className="hidden md:flex items-center gap-2.5 bg-gray-50/80 dark:bg-gray-800/80 border border-gray-100 dark:border-gray-700 rounded-2xl px-4 py-1.5 text-xs text-gray-500 dark:text-gray-400 font-mono font-medium shadow-xs backdrop-blur-xs"
+          >
             <Clock size={14} className="text-indigo-600 dark:text-indigo-400 animate-pulse" />
             <span>Classroom Clock:</span>
             <strong className="text-gray-900 dark:text-gray-100">
-              {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              {currentTime.toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+              })}
             </strong>
           </div>
 
-          {/* Nav Actions / View Switcher Toggle & Dark Mode */}
           <div className="flex items-center gap-3">
-            {/* Dark Mode Sun & Moon Toggle */}
+            {/* ABOUT US BUTTON */}
+            <button
+              type="button"
+              onClick={() => setCurrentView('about')}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition shadow-xs cursor-pointer ${
+                currentView === 'about'
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900'
+              }`}
+            >
+              <Info size={14} />
+              <span>About Us</span>
+            </button>
+
             <DarkModeToggle />
 
-            <div className="flex items-center gap-2.5 bg-gray-100 dark:bg-gray-800 p-1 rounded-2xl border border-gray-200 dark:border-gray-700">
+            <div className="flex items-center gap-2.5 bg-gray-100/80 dark:bg-gray-800/80 p-1 rounded-2xl border border-gray-200 dark:border-gray-700 backdrop-blur-xs">
               <button
                 id="switch-to-checkin-btn"
+                type="button"
                 onClick={() => setCurrentView('checkin')}
                 className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all duration-150 cursor-pointer ${
                   currentView === 'checkin'
@@ -364,28 +657,48 @@ export default function App() {
 
               <button
                 id="switch-to-dashboard-btn"
-                onClick={() => setCurrentView(authUser ? roleView(authUser.role) : 'login')}
+                type="button"
+                onClick={() =>
+                  setCurrentView(
+                    authUser ? roleView(authUser.role) : 'login'
+                  )
+                }
                 className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all duration-150 cursor-pointer ${
-                  currentView !== 'checkin'
+                  currentView !== 'checkin' && currentView !== 'about'
                     ? 'bg-indigo-600 text-white shadow-xs'
                     : 'text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400'
                 }`}
               >
                 {authUser ? <Unlock size={14} /> : <Lock size={14} />}
-                <span>{authUser ? (isTeacher ? 'Teacher Dashboard' : isStudent ? 'My Attendance' : 'Admin Dashboard') : 'Sign In'}</span>
+                <span>
+                  {authUser
+                    ? isTeacher
+                      ? 'Teacher Dashboard'
+                      : isStudent
+                        ? 'My Attendance'
+                        : 'Admin Dashboard'
+                    : 'Sign In'}
+                </span>
               </button>
             </div>
           </div>
-
         </div>
       </header>
 
-      {/* 2. MAIN WORKSPACE */}
-      <main id="app-main-workspace" className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
-
+      <main
+        id="app-main-workspace"
+        className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col justify-center items-center"
+      >
         <AnimatePresence mode="wait">
           {currentView === 'checkin' && (
-            <motion.div key="checkin-view" initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -15 }} transition={{ duration: 0.2 }}>
+            <motion.div
+              key="checkin-view"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              transition={{ duration: 0.2 }}
+              className="w-full max-w-xl my-auto"
+            >
               <StudentPortal
                 sections={sections}
                 preselectedSectionId={preselectedSectionId}
@@ -396,54 +709,93 @@ export default function App() {
             </motion.div>
           )}
 
+          {currentView === 'about' && (
+            <motion.div
+              key="about-view"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              transition={{ duration: 0.2 }}
+              className="w-full"
+            >
+              <AboutUs onBackToHome={() => setCurrentView('checkin')} />
+            </motion.div>
+          )}
+
           {currentView === 'login' && (
-            <motion.div key="login-view" initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -15 }} transition={{ duration: 0.2 }}>
-              <LoginPage onLoginSuccess={handleLoginSuccess} onBackToCheckin={() => setCurrentView('checkin')} />
+            <motion.div
+              key="login-view"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              transition={{ duration: 0.2 }}
+              className="w-full max-w-xl my-auto"
+            >
+              <LoginPage
+                onLoginSuccess={handleLoginSuccess}
+                onBackToCheckin={() => setCurrentView('checkin')}
+              />
             </motion.div>
           )}
 
           {currentView === 'admin' && authUser?.role === 'admin' && (
-            <motion.div key="admin-view" initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -15 }} transition={{ duration: 0.2 }}>
+            <motion.div
+              key="admin-view"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              transition={{ duration: 0.2 }}
+              className="w-full"
+            >
               <AdminDashboard onLogout={handleLogOut} />
             </motion.div>
           )}
 
-          {currentView === 'my-attendance' && authUser?.role === 'student' && (
-            <motion.div key="student-history-view" initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -15 }} transition={{ duration: 0.2 }}>
-              <StudentAttendanceHistory studentName={authUser.name} onLogOut={handleLogOut} />
-            </motion.div>
-          )}
+          {currentView === 'my-attendance' &&
+            authUser?.role === 'student' && (
+              <motion.div
+                key="student-history-view"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                transition={{ duration: 0.2 }}
+                className="w-full"
+              >
+                <StudentAttendanceHistory
+                  studentName={authUser.name}
+                  onLogOut={handleLogOut}
+                />
+              </motion.div>
+            )}
 
           {currentView === 'teacher' && authUser?.role === 'teacher' && (
-            <motion.div key="teacher-dashboard-view" initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -15 }} transition={{ duration: 0.2 }} className="relative">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <span className="inline-flex items-center gap-1 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                    <Sparkles size={10} />
-                    <span>Instructor Access</span>
-                  </span>
-                  <h1 className="text-2xl sm:text-3xl font-bold font-display text-gray-900 dark:text-white tracking-tight mt-1">Teacher Dashboard</h1>
-                </div>
-
+            <motion.div
+              key="teacher-dashboard-view"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              transition={{ duration: 0.2 }}
+              className="relative w-full"
+            >
+              <div className="flex items-center justify-end mb-4">
                 <button
                   id="btn-settings-pin"
-                  onClick={() => {
-                    setNewTeacherName(authUser.name);
-                    setNewTeacherPhoto(authUser.photo || '');
-                    setNewTeacherRoom(authUser.room || '');
-                    setNewTeacherSubject(authUser.subject || '');
-                    setNewPassword('');
-                    setShowPassword(false);
-                    setIsSettingsOpen(true);
-                  }}
+                  type="button"
+                  onClick={openSecuritySettings}
                   className="flex items-center gap-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
                 >
                   <Settings size={14} />
-                  <span>Configure Profile</span>
+                  <span>Configure Security</span>
                 </button>
               </div>
 
               <TeacherDashboard
+                teacher={{
+                  name: authUser.name,
+                  username: authUser.username,
+                  photo: authUser.photo || undefined,
+                  role: authUser.role,
+                }}
                 sections={teacherSections}
                 records={teacherRecords}
                 onAddSection={handleAddSection}
@@ -457,157 +809,130 @@ export default function App() {
             </motion.div>
           )}
         </AnimatePresence>
-
       </main>
 
-      {/* 3. SETTINGS CHANGE PROFILE MODAL */}
+      {/* ===================== TEACHER SECURITY MODAL ===================== */}
+
       <AnimatePresence>
         {isSettingsOpen && authUser?.role === 'teacher' && (
-          <div id="settings-modal-overlay" className="fixed inset-0 bg-black/55 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div
+            id="settings-modal-overlay"
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50"
+          >
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white dark:bg-gray-900 rounded-2xl max-w-sm w-full p-6 shadow-xl border border-gray-100 dark:border-gray-800 space-y-4"
+              className="bg-white dark:bg-gray-900 rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-gray-100 dark:border-gray-800 space-y-6"
             >
-              <div className="flex justify-between items-center border-b border-gray-100 dark:border-gray-800 pb-2">
-                <h3 className="text-base font-bold text-gray-900 dark:text-white">Configure Profile & Security</h3>
-                <span className="text-[10px] bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-bold px-2 py-0.5 rounded-full">Settings</span>
+              <div className="flex justify-between items-center border-b border-gray-100 dark:border-gray-800 pb-4">
+                <div>
+                  <h3 className="text-xl font-extrabold text-gray-900 dark:text-white tracking-tight">
+                    Configure Security
+                  </h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Change your login credentials without changing your profile name.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={isSavingSecurity}
+                  onClick={() => setIsSettingsOpen(false)}
+                  className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1 transition cursor-pointer font-bold disabled:opacity-50"
+                  aria-label="Close settings"
+                >
+                  ✕
+                </button>
               </div>
 
-              <form onSubmit={handleSaveProfile} className="space-y-4">
-                <div className="space-y-1.5">
-                  <label htmlFor="settings-teacher-name" className="text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider block">Teacher Name / Title</label>
+              <form onSubmit={handleSaveProfile} className="space-y-5">
+                <div className="space-y-2">
+                  <label
+                    htmlFor="settings-teacher-username"
+                    className="text-xs font-bold text-gray-500 uppercase tracking-wider block"
+                  >
+                    LOGIN USERNAME
+                  </label>
+
                   <input
-                    id="settings-teacher-name"
+                    id="settings-teacher-username"
                     type="text"
+                    autoComplete="username"
                     required
-                    placeholder="Mr. Smith"
-                    value={newTeacherName}
-                    onChange={(e) => setNewTeacherName(e.target.value)}
-                    className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-sm font-semibold text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                    maxLength={100}
+                    placeholder="Enter new username"
+                    value={newTeacherUsername}
+                    onChange={(e) => setNewTeacherUsername(e.target.value)}
+                    disabled={isSavingSecurity}
+                    className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-4 py-3 text-sm font-bold text-gray-900 dark:text-white focus:outline-none focus:border-indigo-600 transition disabled:opacity-60"
                   />
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider block">Teacher Photo</label>
-                  <div className="flex items-center gap-4">
-                    <div className="w-16 h-16 rounded-2xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 flex items-center justify-center overflow-hidden shrink-0 relative">
-                      {newTeacherPhoto ? (
-                        <img
-                          src={newTeacherPhoto}
-                          alt="Teacher Preview"
-                          referrerPolicy="no-referrer"
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="text-gray-400 font-bold text-xs uppercase text-center font-mono p-1">No Pic</div>
-                      )}
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                      <label className="cursor-pointer bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:text-indigo-600 font-semibold text-[11px] px-3 py-1.5 rounded-lg transition text-center shadow-2xs">
-                        <span>Upload Photo</span>
-                        <input
-                          id="settings-teacher-photo-input"
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              if (file.size > 2 * 1024 * 1024) {
-                                alert('File is too large. Max size is 2MB.');
-                                return;
-                              }
-                              const reader = new FileReader();
-                              reader.onloadend = () => {
-                                if (typeof reader.result === 'string') {
-                                  setNewTeacherPhoto(reader.result);
-                                }
-                              };
-                              reader.readAsDataURL(file);
-                            }
-                          }}
-                        />
-                      </label>
-                      {newTeacherPhoto && (
-                        <button
-                          id="btn-remove-teacher-photo"
-                          type="button"
-                          onClick={() => setNewTeacherPhoto('')}
-                          className="text-rose-600 hover:text-rose-800 font-bold text-[10px] uppercase text-left tracking-wider cursor-pointer"
-                        >
-                          Remove Photo
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                  <label
+                    htmlFor="settings-new-password"
+                    className="text-xs font-bold text-gray-500 uppercase tracking-wider block"
+                  >
+                    NEW PASSWORD (OPTIONAL)
+                  </label>
 
-                <div className="space-y-1.5">
-                  <label htmlFor="settings-teacher-room" className="text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider block">ROOM (Optional)</label>
-                  <input
-                    id="settings-teacher-room"
-                    type="text"
-                    placeholder="Room 101, Science Lab"
-                    value={newTeacherRoom}
-                    onChange={(e) => setNewTeacherRoom(e.target.value)}
-                    className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-sm font-semibold text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label htmlFor="settings-teacher-subject" className="text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider block">SUBJECT (Optional)</label>
-                  <input
-                    id="settings-teacher-subject"
-                    type="text"
-                    placeholder="Mathematics, Science"
-                    value={newTeacherSubject}
-                    onChange={(e) => setNewTeacherSubject(e.target.value)}
-                    className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-sm font-semibold text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-                  />
-                </div>
-
-                {/* Password Input with Eye / EyeOff Hide and Unhide feature */}
-                <div className="space-y-1.5 relative">
-                  <label htmlFor="settings-new-password" className="text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider block">Change Security Password (Optional)</label>
                   <div className="relative">
                     <input
                       id="settings-new-password"
                       type={showPassword ? 'text' : 'password'}
+                      autoComplete="new-password"
                       minLength={4}
-                      placeholder="Leave blank to keep existing"
+                      maxLength={128}
+                      placeholder="Leave blank to keep current password"
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
-                      className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 pr-10 text-sm font-semibold text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-mono"
+                      disabled={isSavingSecurity}
+                      className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-4 py-3 pr-12 text-sm font-bold text-gray-900 dark:text-white focus:outline-none focus:border-indigo-600 transition font-mono disabled:opacity-60"
                     />
+
                     <button
                       type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer"
-                      title={showPassword ? "Hide Password" : "Show Password"}
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      disabled={isSavingSecurity}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer disabled:opacity-50"
+                      title={showPassword ? 'Hide Password' : 'Show Password'}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
                     >
-                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      {showPassword ? (
+                        <EyeOff size={18} />
+                      ) : (
+                        <Eye size={18} />
+                      )}
                     </button>
                   </div>
-                  <p className="text-[10px] text-gray-400">At least 4 characters if changing.</p>
+
+                  <p className="text-[11px] text-gray-400">
+                    Use at least 4 characters. Leave blank if you do not want to change your password.
+                  </p>
                 </div>
 
-                <div className="flex gap-2 justify-end pt-2">
+                <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100 dark:border-gray-800">
                   <button
                     id="btn-cancel-settings"
                     type="button"
+                    disabled={isSavingSecurity}
                     onClick={() => setIsSettingsOpen(false)}
-                    className="bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 font-semibold text-xs px-4 py-2.5 rounded-xl transition cursor-pointer"
+                    className="px-5 py-2.5 text-xs font-bold text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-xl transition cursor-pointer disabled:opacity-50"
                   >
                     Cancel
                   </button>
+
                   <button
                     id="btn-save-settings"
                     type="submit"
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow-xs cursor-pointer"
+                    disabled={isSavingSecurity}
+                    className="flex items-center justify-center gap-2 px-6 py-2.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    Save Changes
+                    {isSavingSecurity && (
+                      <LoaderCircle size={14} className="animate-spin" />
+                    )}
+                    {isSavingSecurity ? 'Saving...' : 'Save Changes'}
                   </button>
                 </div>
               </form>
@@ -616,14 +941,24 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* 4. APP FOOTER */}
-      <footer id="app-footer" className="bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800 py-6 px-4 mt-12 text-center text-xs text-gray-400 transition-colors">
+      <footer
+        id="app-footer"
+        className={`border-t border-gray-100/20 dark:border-gray-800/20 py-6 px-4 mt-12 text-center text-xs text-gray-600 dark:text-gray-300 transition-colors ${
+          isPublicView
+            ? 'bg-white/70 dark:bg-gray-900/70 backdrop-blur-md'
+            : 'bg-white dark:bg-gray-900'
+        }`}
+      >
         <div className="max-w-7xl mx-auto space-y-1.5">
-          <p className="font-semibold text-gray-500 dark:text-gray-400">QR Attendance Portal — Secure School Management</p>
-          <p>Developed by Nimrold Albaracin for students to log student arrival punctuality.</p>
+          <p className="font-semibold text-gray-700 dark:text-gray-200">
+            QR Attendance Portal — Secure School Management
+          </p>
+          <p className="text-gray-500 dark:text-gray-400">
+            Developed by BIT-ELECTRICAL 3-5 for students to log student arrival
+            punctuality.
+          </p>
         </div>
       </footer>
-
     </div>
   );
 }

@@ -1,14 +1,20 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Section, formatTimeToAMPM } from '../types';
-import { BookOpen, Calendar, Clock, RefreshCw, Send, User, MapPin } from 'lucide-react';
-import AttendanceBanner from './AttendanceBanner';
-import StudentNamePicker from './StudentNamePicker';
-import AttendanceResultModal, { AttendancePopupData } from './AttendanceResultModal';
-import { apiFetch } from '../lib/api';
+import React, { useState, useEffect, useRef } from 'react';
+import { Section } from '../types';
+import {
+  ArrowRight,
+  CheckCircle2,
+  AlertCircle,
+  QrCode,
+  UserCheck,
+  Camera,
+  Upload,
+  X,
+  ShieldAlert,
+  Lock,
+} from 'lucide-react';
 
 interface StudentPortalProps {
-  sections?: Section[];
-  teachers?: any[];
+  sections: Section[];
   preselectedSectionId?: string | null;
   onSubmitAttendance: (
     studentId: string,
@@ -17,12 +23,11 @@ interface StudentPortalProps {
     sectionName: string,
     date: string,
     time: string,
-    type?: "In" | "Out"
+    type?: 'In' | 'Out'
   ) => Promise<{
-    status: "Present" | "Late" | "Time Out";
+    status: 'Present' | 'Late' | 'Time Out';
     startTime: string;
   }>;
-
   onUpdateStudentPhoto?: (
     sectionId: string,
     studentId: string,
@@ -31,339 +36,762 @@ interface StudentPortalProps {
   onGoToLogin: () => void;
 }
 
+function formatSectionTime(timeStr: string): string {
+  if (!timeStr || !/^\d{1,2}:\d{2}$/.test(timeStr)) {
+    return timeStr || '';
+  }
+
+  const [hours, minutes] = timeStr.split(':').map(Number);
+
+  if (
+    !Number.isInteger(hours) ||
+    !Number.isInteger(minutes) ||
+    hours < 0 ||
+    hours > 23 ||
+    minutes < 0 ||
+    minutes > 59
+  ) {
+    return timeStr;
+  }
+
+  const period = hours >= 12 ? 'PM' : 'AM';
+  const hour12 = hours % 12 || 12;
+
+  return `${hour12}:${String(minutes).padStart(2, '0')} ${period}`;
+}
+
 export default function StudentPortal({
-  sections: propSections = [],
-  teachers: propTeachers = [],
+  sections: propSections,
   preselectedSectionId,
   onSubmitAttendance,
-  onUpdateStudentPhoto,
-  onGoToLogin
 }: StudentPortalProps) {
-  // Helper functions to retrieve local date and time strings
-  const getTodayLocalDateStr = () => {
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, '0');
-    const day = String(today.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
+  const [step, setStep] = useState<
+    'qr_scan' | 'facial_verify' | 'success' | 'failed'
+  >('qr_scan');
 
-  const getNowLocalTimeStr = () => {
-    const now = new Date();
-    const hours = String(now.getHours()).padStart(2, '0');
-    const minutes = String(now.getMinutes()).padStart(2, '0');
-    return `${hours}:${minutes}`;
-  };
+  const [sections, setSections] = useState<any[]>(propSections || []);
+  const [teachersList, setTeachersList] = useState<any[]>([]);
 
-  // State initializations
-  const [sections, setSections] = useState<Section[]>(propSections);
-  const [teachers, setTeachers] = useState<any[]>(propTeachers);
-  const [selectedTeacherId, setSelectedTeacherId] = useState('');
-  const [selectedSectionId, setSelectedSectionId] = useState('');
-  const [selectedStudentId, setSelectedStudentId] = useState('');
-  const [arrivalDate, setArrivalDate] = useState(getTodayLocalDateStr());
-  const [arrivalTime, setArrivalTime] = useState(getNowLocalTimeStr());
-
-  // URL search parameter check for Time In or Time Out mode
-  const params = new URLSearchParams(window.location.search);
-  const isTimeOut = params.get('type') === 'out';
-
-  // Result popup state
-  const [popupData, setPopupData] = useState<AttendancePopupData | null>(null);
-
-  // Keep local states synced if props change from parent
+  // Fetch teachers and sections directly from public API to ensure dropdowns are populated
   useEffect(() => {
-    if (propSections.length > 0) setSections(propSections);
-  }, [propSections]);
-
-  useEffect(() => {
-    if (propTeachers.length > 0) setTeachers(propTeachers);
-  }, [propTeachers]);
-
-  // Dynamic API fetching on mount
-  useEffect(() => {
-    const fetchPortalData = async () => {
+    const fetchPublicData = async () => {
       try {
-        const resSections = await apiFetch('/api/sections');
-        if (resSections.ok) {
-          if (Array.isArray(resSections.data)) setSections(resSections.data);
-          else if (resSections.data.sections) setSections(resSections.data.sections);
-        }
-
-        // Fetch teachers list from admin or fallback teacher endpoints
-        const resTeachers = await apiFetch('/api/admin/teachers');
-        if (resTeachers.ok) {
-          if (Array.isArray(resTeachers.data)) setTeachers(resTeachers.data);
-          else if (resTeachers.data.teachers) setTeachers(resTeachers.data.teachers);
-        } else {
-          const resPubTeachers = await apiFetch('/api/teachers');
-          if (resPubTeachers.ok) {
-            if (Array.isArray(resPubTeachers.data)) setTeachers(resPubTeachers.data);
-            else if (resPubTeachers.data.teachers) setTeachers(resPubTeachers.data.teachers);
+        const res = await fetch('http://localhost:5001/api/state/public');
+        const data = await res.json();
+        if (data.success) {
+          setTeachersList(data.teachers || []);
+          if (data.sections && data.sections.length > 0) {
+            setSections(data.sections);
           }
         }
       } catch (err) {
-        console.error('Failed to fetch portal data:', err);
+        console.error('Error fetching public state in student portal:', err);
       }
     };
+    fetchPublicData();
+  }, [propSections]);
 
-    fetchPortalData();
-  }, []);
+  const [scannedSectionId, setScannedSectionId] = useState(
+    preselectedSectionId || ''
+  );
+  const [attendanceType, setAttendanceType] = useState<'In' | 'Out'>('In');
+  const [selectedTeacherId, setSelectedTeacherId] = useState('');
+  const [selectedStudentId, setSelectedStudentId] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [verifiedStudent, setVerifiedStudent] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  
+  const [cameraActive, setCameraActive] = useState(false);
+  const [isScanningQR, setIsScanningQR] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
 
-  // Consolidate unique teachers list
-  const teachersList = useMemo(() => {
-    const map = new Map<string, { id: string; name: string; username?: string; photo?: string }>();
-    
-    teachers.forEach(t => {
-      const id = String(t.id || t._id || t.username || '');
-      const name = t.name || t.username;
-      if (id && name) {
-        map.set(id, { id, name, username: t.username, photo: t.photo || t.teacherPhoto });
-      }
-    });
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const qrVideoRef = useRef<HTMLVideoElement>(null);
+  const qrStreamRef = useRef<MediaStream | null>(null);
 
-    sections.forEach(sec => {
-      const tId = String(sec.teacherId || (sec as any).teacher_id || '');
-      const tName = sec.teacherName || (sec as any).teacher_name;
-      if (tId && tName && !map.has(tId)) {
-        map.set(tId, {
-          id: tId,
-          name: tName,
-          photo: (sec as any).teacherPhoto || (sec as any).photo
-        });
-      }
-    });
+  const stopCamera = () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
 
-    return Array.from(map.values());
-  }, [teachers, sections]);
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
 
-  // Robust section filtering matching ID, username, or teacher name
-  const filteredSections = useMemo(() => {
-    if (!selectedTeacherId) return [];
+    setCameraActive(false);
+  };
 
-    const currentTeacher = teachersList.find(t => String(t.id) === String(selectedTeacherId));
+  const startCamera = async () => {
+    setErrorMessage('');
 
-    return sections.filter(s => {
-      const sTeacherId = String(s.teacherId || (s as any).teacher_id || '');
-      const sTeacherName = String(s.teacherName || (s as any).teacher_name || '').toLowerCase();
-      const selId = String(selectedTeacherId).toLowerCase();
-      
-      const selName = currentTeacher ? currentTeacher.name.toLowerCase() : '';
-      const selUsername = currentTeacher && currentTeacher.username ? currentTeacher.username.toLowerCase() : '';
-
-      return (
-        sTeacherId === selId ||
-        (selName && sTeacherName === selName) ||
-        (selUsername && sTeacherName === selUsername) ||
-        (!sTeacherId && !sTeacherName) // Show unassigned sections as fallback
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setErrorMessage(
+        'Camera access is unavailable. Use HTTPS or localhost and check browser permissions.'
       );
-    });
-  }, [sections, selectedTeacherId, teachersList]);
+      return;
+    }
 
-  // Preselect section when directed via QR code URL
-  useEffect(() => {
-    if (preselectedSectionId) {
-      const found = sections.find(s => s.id === preselectedSectionId);
-      if (found) {
-        const foundTeacherId = String(found.teacherId || (found as any).teacher_id || '');
-        setSelectedTeacherId(foundTeacherId);
-        setSelectedSectionId(found.id);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user' },
+        audio: false,
+      });
+
+      streamRef.current = stream;
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+        setCameraActive(true);
+      } else {
+        stream.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+      }
+    } catch (error) {
+      console.error('Camera error:', error);
+      setErrorMessage(
+        'Unable to open the camera. Please allow camera access in your browser.'
+      );
+      setCameraActive(false);
+    }
+  };
+
+  const stopQrCamera = () => {
+    qrStreamRef.current?.getTracks().forEach((track) => track.stop());
+    qrStreamRef.current = null;
+    if (qrVideoRef.current) {
+      qrVideoRef.current.srcObject = null;
+    }
+    setIsScanningQR(false);
+  };
+
+  const startQrCamera = async () => {
+    setErrorMessage('');
+    if (!('BarcodeDetector' in window)) {
+      setErrorMessage('QR Code scanning via camera is not supported in this browser. Please use Upload QR or Manual selection.');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' },
+        audio: false,
+      });
+      qrStreamRef.current = stream;
+      setIsScanningQR(true);
+
+      if (qrVideoRef.current) {
+        qrVideoRef.current.srcObject = stream;
+        await qrVideoRef.current.play();
+        scanQrLoop();
+      }
+    } catch (error) {
+      console.error('QR Camera error:', error);
+      setErrorMessage('Unable to access camera for QR scanning.');
+      setIsScanningQR(false);
+    }
+  };
+
+  const scanQrLoop = async () => {
+    if (!isScanningQR && !qrStreamRef.current) return;
+
+    if (qrVideoRef.current && qrVideoRef.current.readyState === qrVideoRef.current.HAVE_ENOUGH_DATA) {
+      try {
+        const barcodeDetector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
+        const barcodes = await barcodeDetector.detect(qrVideoRef.current);
+        if (barcodes.length > 0) {
+          const qrText = barcodes[0].rawValue;
+          processScannedCode(qrText);
+          return;
+        }
+      } catch (err) {
+        // Ignore detection frame errors while scanning
       }
     }
-  }, [preselectedSectionId, sections]);
 
-  // Reset student selection when section selection changes
-  useEffect(() => {
-    setSelectedStudentId('');
-  }, [selectedSectionId]);
-
-  const activeSection = sections.find(s => s.id === selectedSectionId);
-  const studentsList = activeSection?.students || [];
-  const selectedStudent = studentsList.find(s => s.id === selectedStudentId);
-
-  // Sync inputs with current system time
-  const handleSetToCurrentTime = () => {
-    setArrivalDate(getTodayLocalDateStr());
-    setArrivalTime(getNowLocalTimeStr());
+    if (qrStreamRef.current) {
+      requestAnimationFrame(scanQrLoop);
+    }
   };
 
-  // Submit student attendance record
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedSectionId || !selectedStudentId || !activeSection) return;
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-    const student = studentsList.find(s => s.id === selectedStudentId);
-    if (!student) return;
+    setErrorMessage('');
+    if (!('BarcodeDetector' in window)) {
+      setErrorMessage('QR Code detection from image is not supported in this browser.');
+      return;
+    }
 
-    const result = await onSubmitAttendance(
-      student.id,
-      student.name,
-      activeSection.id,
-      activeSection.name,
-      arrivalDate,
-      arrivalTime,
-      isTimeOut ? "Out" : "In"
+    const image = document.createElement('img');
+    image.src = URL.createObjectURL(file);
+    image.onload = async () => {
+      try {
+        const barcodeDetector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
+        const barcodes = await barcodeDetector.detect(image);
+        if (barcodes.length > 0) {
+          const qrText = barcodes[0].rawValue;
+          processScannedCode(qrText);
+        } else {
+          setErrorMessage('No valid QR code found in the uploaded image.');
+        }
+      } catch (err) {
+        setErrorMessage('Failed to read QR code from the uploaded image.');
+      }
+    };
+    image.onerror = () => {
+      setErrorMessage('Invalid image file.');
+    };
+  };
+
+  const processScannedCode = (code: string) => {
+    const matchedSection = sections.find(
+      (s) => s.id === code.trim() || code.includes(s.id)
     );
 
-    setPopupData({
-      isOpen: true,
-      studentName: student.name,
-      sectionName: activeSection.name,
-      arrivalDate,
-      arrivalTime,
-      status: result.status,
-      startTime: result.startTime,
-    });
+    if (matchedSection) {
+      stopQrCamera();
+      setScannedSectionId(matchedSection.id);
+      setErrorMessage('');
+      setStep('facial_verify');
+    } else {
+      setErrorMessage(`Scanned QR code does not match any active section: "${code}"`);
+    }
   };
 
-  // Reset popup and selection states
-  const handleClosePopupAndReset = () => {
-    setPopupData(null);
-    setSelectedStudentId('');
-    setArrivalDate(getTodayLocalDateStr());
-    setArrivalTime(getNowLocalTimeStr());
+  useEffect(() => {
+    if (step === 'facial_verify') {
+      void startCamera();
+    } else {
+      stopCamera();
+    }
+
+    return () => {
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+      stopQrCamera();
+    };
+  }, [step]);
+
+  const handleValidateManual = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+
+    if (!scannedSectionId) {
+      setErrorMessage('Please select a teacher and subject/section.');
+      return;
+    }
+
+    const sectionExists = sections.some(
+      (section) => section.id === scannedSectionId
+    );
+
+    if (!sectionExists) {
+      setErrorMessage('The selected section was not found. Please try again.');
+      return;
+    }
+
+    setErrorMessage('');
+    setStep('facial_verify');
   };
+
+  const handleCaptureAndVerifyFace = async () => {
+    if (isVerifying) return;
+
+    if (!selectedStudentId) {
+      setErrorMessage('Please select your name from the list.');
+      return;
+    }
+
+    if (attendanceType === 'In' && !passwordInput) {
+      setErrorMessage('Please enter your student password.');
+      return;
+    }
+
+    const currentSection = sections.find((s) => s.id === scannedSectionId);
+    const selectedStudent = currentSection?.students?.find(
+      (st: any) => String(st.id) === String(selectedStudentId)
+    );
+
+    if (!selectedStudent) {
+      setErrorMessage('Selected student not found in this section.');
+      return;
+    }
+
+    const isUnverified = !selectedStudent.isVerified && !selectedStudent.photoUrl;
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+
+    if (!video || !canvas || !cameraActive || video.videoWidth === 0) {
+      setErrorMessage('ACCESS BLOCKED: Facial verification camera is mandatory. Please enable camera access.');
+      setStep('failed');
+      return;
+    }
+
+    const context = canvas.getContext('2d');
+    if (!context) {
+      setErrorMessage('Failed to capture facial security frame.');
+      setStep('failed');
+      return;
+    }
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const capturedImage = canvas.toDataURL('image/jpeg', 0.85);
+
+    if (!capturedImage || capturedImage.length < 100) {
+      setErrorMessage('Invalid facial capture. Please position your face clearly in front of the camera.');
+      setStep('failed');
+      return;
+    }
+
+    setIsVerifying(true);
+    setErrorMessage('');
+
+    try {
+      const response = await fetch('http://localhost:5001/api/student/verify-attendance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          studentId: selectedStudent.id,
+          username: selectedStudent.username || selectedStudent.name,
+          password: attendanceType === 'In' ? passwordInput : '',
+          sectionId: scannedSectionId,
+          capturedPhoto: capturedImage,
+          type: attendanceType,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (
+        !response.ok ||
+        !data.success ||
+        !data.student?.id ||
+        !data.student?.name ||
+        (isUnverified && data.student?.isVerified === false)
+      ) {
+        setErrorMessage(
+          data.error ||
+            'ACCESS DENIED: Account is Not Fully Verified. Live facial security scan required to unlock access.'
+        );
+        setStep('failed');
+        return;
+      }
+
+      const studentId = String(data.student.id);
+      const studentName = String(data.student.name);
+      const section = sections.find(
+        (item) => item.id === scannedSectionId
+      );
+
+      if (!section) {
+        setErrorMessage('The selected class section could not be found.');
+        setStep('failed');
+        return;
+      }
+
+      setVerifiedStudent({ id: studentId, name: studentName });
+
+      const now = new Date();
+      const dateStr = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, '0'),
+        String(now.getDate()).padStart(2, '0'),
+      ].join('-');
+
+      const timeStr = [
+        String(now.getHours()).padStart(2, '0'),
+        String(now.getMinutes()).padStart(2, '0'),
+        String(now.getSeconds()).padStart(2, '0'),
+      ].join(':');
+
+      await onSubmitAttendance(
+        studentId,
+        studentName,
+        scannedSectionId,
+        section.name,
+        dateStr,
+        timeStr,
+        attendanceType
+      );
+
+      setStep('success');
+    } catch (error) {
+      console.error('Attendance verification error:', error);
+      setErrorMessage(
+        'Server security connection error. Access blocked for unverified accounts.'
+      );
+      setStep('failed');
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const resetPortal = () => {
+    stopCamera();
+    stopQrCamera();
+    setSelectedStudentId('');
+    setPasswordInput('');
+    setSelectedTeacherId('');
+    setScannedSectionId('');
+    setErrorMessage('');
+    setVerifiedStudent(null);
+    setAttendanceType('In');
+    setStep('qr_scan');
+  };
+
+  const activeTeacher = teachersList.find((t) => String(t.id) === String(selectedTeacherId));
+  const filteredSections = activeTeacher ? activeTeacher.sections : sections;
+
+  const currentActiveSection = sections.find((s) => s.id === scannedSectionId);
+  const sectionStudents = currentActiveSection?.students || [];
+
+  const selectedStudentObj = sectionStudents.find((st: any) => String(st.id) === String(selectedStudentId));
+  const isStudentUnverified = selectedStudentObj && !selectedStudentObj.isVerified && !selectedStudentObj.photoUrl;
 
   return (
-    <div id="student-portal-root" className="max-w-2xl mx-auto space-y-6">
+    <div className="max-w-xl mx-auto bg-white dark:bg-gray-900 rounded-3xl border p-8 shadow-xl space-y-6">
+      <div className="text-center space-y-2">
+        <h2 className="text-2xl font-black">
+          Student Attendance Portal
+        </h2>
+        <p className="text-xs text-gray-400">
+          Facial Security &amp; Verification Portal
+        </p>
+      </div>
 
-      <AttendanceBanner isTimeOut={isTimeOut} activeSection={activeSection} onGoToLogin={onGoToLogin} />
+      {step === 'qr_scan' && (
+        <div className="space-y-6 text-xs">
+          <div>
+            <label className="font-bold block mb-1">
+              Attendance Type
+            </label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setAttendanceType('In')}
+                className={`flex-1 py-2.5 rounded-xl font-bold ${
+                  attendanceType === 'In'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300'
+                }`}
+              >
+                Time In
+              </button>
+              <button
+                type="button"
+                onClick={() => setAttendanceType('Out')}
+                className={`flex-1 py-2.5 rounded-xl font-bold ${
+                  attendanceType === 'Out'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300'
+                }`}
+              >
+                Time Out
+              </button>
+            </div>
+          </div>
 
-      <form onSubmit={handleSubmit} id="student-attendance-form" className="bg-white dark:bg-gray-900 rounded-3xl border border-gray-100 dark:border-gray-800 p-6 sm:p-8 shadow-sm space-y-6 transition-colors">
+          <div className="p-5 bg-indigo-50/50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-900 rounded-2xl space-y-4">
+            <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 font-bold">
+              <QrCode size={18} />
+              <span>QR Code Verification</span>
+            </div>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400">
+              Scan using your camera or upload a QR code image to proceed to facial security verification.
+            </p>
 
-        {/* 1. SELECT TEACHER FIRST */}
-        <div className="space-y-2">
-          <label htmlFor="student-teacher-select" className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider flex items-center gap-1">
-            <User size={14} className="text-gray-400" />
-            <span>1. Select Teacher</span>
-          </label>
-
-          <select
-            id="student-teacher-select"
-            required
-            value={selectedTeacherId}
-            onChange={(e) => {
-              setSelectedTeacherId(e.target.value);
-              setSelectedSectionId(''); 
-            }}
-            className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-gray-100 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer"
-          >
-            <option value="" disabled>-- Choose Teacher --</option>
-            {teachersList.length > 0 ? (
-              teachersList.map(t => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))
+            {isScanningQR ? (
+              <div className="space-y-3 text-center">
+                <div className="relative inline-block overflow-hidden rounded-2xl border-4 border-indigo-600 bg-black shadow-lg">
+                  <video
+                    ref={qrVideoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-64 h-64 object-cover"
+                  />
+                </div>
+                <div>
+                  <button
+                    type="button"
+                    onClick={stopQrCamera}
+                    className="px-4 py-2 bg-rose-600 text-white font-bold rounded-xl flex items-center justify-center gap-2 mx-auto"
+                  >
+                    <X size={16} />
+                    <span>Close QR Camera</span>
+                  </button>
+                </div>
+              </div>
             ) : (
-              <option value="" disabled>No teachers available</option>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button
+                  type="button"
+                  onClick={startQrCamera}
+                  className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition shadow"
+                >
+                  <Camera size={16} />
+                  <span>Scan QR with Camera</span>
+                </button>
+
+                <label className="flex-1 py-3 px-4 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200 font-bold rounded-xl flex items-center justify-center gap-2 transition shadow cursor-pointer text-center">
+                  <Upload size={16} className="text-indigo-600 dark:text-indigo-400" />
+                  <span>Upload QR Image</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                </label>
+              </div>
             )}
-          </select>
-        </div>
-
-        {/* 2. CHOOSE CLASS SECTION */}
-        <div className="space-y-2">
-          <label htmlFor="student-section-select" className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider flex items-center gap-1">
-            <BookOpen size={14} className="text-gray-400" />
-            <span>2. Choose Class Section</span>
-          </label>
-
-          <select
-            id="student-section-select"
-            required
-            disabled={!selectedTeacherId}
-            value={selectedSectionId}
-            onChange={(e) => setSelectedSectionId(e.target.value)}
-            className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 text-sm text-gray-800 dark:text-gray-100 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition disabled:opacity-50 cursor-pointer"
-          >
-            <option value="" disabled>
-              {selectedTeacherId 
-                ? (filteredSections.length > 0 ? "-- Select Section --" : "No sections found for this teacher") 
-                : "Select a teacher first"}
-            </option>
-            {filteredSections.map(s => (
-              <option key={s.id} value={s.id}>
-                {s.name} {s.startTime ? `(Start: ${formatTimeToAMPM(s.startTime)})` : ''}
-                {s.room ? ` • Room: ${s.room}` : ''}
-                {s.subject ? ` • Subject: ${s.subject}` : ''}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* 3. SELECT STUDENT NAME */}
-        <div className={!selectedSectionId ? "opacity-50 pointer-events-none" : ""}>
-          <StudentNamePicker
-            studentsList={studentsList}
-            selectedStudentId={selectedStudentId}
-            onSelectStudent={setSelectedStudentId}
-            onUpdateStudentPhoto={onUpdateStudentPhoto ? (studentId, photoUrl) => onUpdateStudentPhoto(selectedSectionId, studentId, photoUrl) : undefined}
-          />
-        </div>
-
-        {/* Time and Date input */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-gray-100 dark:border-gray-800 pt-5">
-          <div className="space-y-2">
-            <label htmlFor="arrival-date-input" className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider flex items-center gap-1">
-              <Calendar size={14} className="text-gray-400" />
-              <span>Arrival Date</span>
-            </label>
-            <input
-              id="arrival-date-input"
-              type="date"
-              required
-              value={arrivalDate}
-              onChange={(e) => setArrivalDate(e.target.value)}
-              className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-sm text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
-            />
           </div>
 
-          <div className="space-y-2">
-            <label htmlFor="arrival-time-input" className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider flex items-center gap-1">
-              <Clock size={14} className="text-gray-400" />
-              <span>Arrival Time</span>
-            </label>
-            <input
-              id="arrival-time-input"
-              type="time"
-              required
-              value={arrivalTime}
-              onChange={(e) => setArrivalTime(e.target.value)}
-              className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-sm text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
-            />
+          <div className="relative flex py-2 items-center">
+            <div className="flex-grow border-t border-gray-200 dark:border-gray-800"></div>
+            <span className="flex-shrink mx-4 text-gray-400 font-bold uppercase text-[10px]">
+              Or Manual Selection (If QR unavailable)
+            </span>
+            <div className="flex-grow border-t border-gray-200 dark:border-gray-800"></div>
           </div>
-        </div>
 
-        <div className="flex justify-end pt-1">
+          <form onSubmit={handleValidateManual} className="space-y-4">
+            <div className="space-y-3">
+              <div>
+                <label className="font-bold block mb-1 flex items-center gap-1.5">
+                  <UserCheck size={14} className="text-indigo-500" />
+                  <span>Choose Teacher</span>
+                </label>
+                <select
+                  value={selectedTeacherId}
+                  onChange={(e) => {
+                    setSelectedTeacherId(e.target.value);
+                    setScannedSectionId('');
+                  }}
+                  className="w-full border dark:border-gray-700 rounded-xl p-3 font-bold bg-white dark:bg-gray-900"
+                >
+                  <option value="">-- Select Teacher --</option>
+                  {teachersList.map((teacher) => (
+                    <option key={teacher.id} value={teacher.id}>
+                      {teacher.name} {teacher.subject ? `(${teacher.subject})` : ''}
+                    </option>
+                  ))}
+                </select>
+
+                {/* TEACHER PROFILE PICTURE PREVIEW CARD */}
+                {activeTeacher && (
+                  <div className="mt-3 p-3 bg-indigo-50/60 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900 rounded-2xl flex items-center gap-3">
+                    {activeTeacher.photo ? (
+                      <img
+                        src={activeTeacher.photo}
+                        alt={activeTeacher.name}
+                        className="w-12 h-12 rounded-full object-cover border-2 border-indigo-600 shadow-sm"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 rounded-full bg-indigo-600 text-white font-black flex items-center justify-center text-lg shadow-sm">
+                        {activeTeacher.name ? activeTeacher.name.charAt(0).toUpperCase() : 'T'}
+                      </div>
+                    )}
+                    <div>
+                      <h4 className="font-extrabold text-sm text-gray-900 dark:text-white">
+                        {activeTeacher.name}
+                      </h4>
+                      <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                        {activeTeacher.subject ? `Subject: ${activeTeacher.subject}` : 'Instructor'} 
+                        {activeTeacher.room ? ` • Room: ${activeTeacher.room}` : ''}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="font-bold block mb-1">
+                  Choose Subject / Section
+                </label>
+                <select
+                  value={scannedSectionId}
+                  onChange={(e) => setScannedSectionId(e.target.value)}
+                  className="w-full border dark:border-gray-700 rounded-xl p-3 font-bold bg-white dark:bg-gray-900"
+                  required
+                >
+                  <option value="">-- Select Subject / Section --</option>
+                  {filteredSections.map((section: any) => (
+                    <option key={section.id} value={section.id}>
+                      {section.name} ({formatSectionTime(section.startTime)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {errorMessage && (
+              <p role="alert" className="text-rose-500 font-bold">
+                {errorMessage}
+              </p>
+            )}
+
+            <button
+              type="submit"
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition"
+            >
+              <span>Proceed to Facial Verification</span>
+              <ArrowRight size={16} />
+            </button>
+          </form>
+        </div>
+      )}
+
+      {step === 'facial_verify' && (
+        <div className="space-y-4 text-xs text-center">
+          <p className="font-bold text-indigo-600 dark:text-indigo-400">
+            Step 2: Select Your Name &amp; Live Facial Verification ({attendanceType === 'In' ? 'Time In' : 'Time Out'})
+          </p>
+
+          <div className="relative inline-block overflow-hidden rounded-2xl border-4 border-indigo-600 bg-black shadow-lg">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="w-72 h-72 object-cover"
+            />
+            <canvas ref={canvasRef} className="hidden" />
+          </div>
+
+          {!cameraActive && (
+            <p className="text-amber-600">
+              The camera is starting or camera access must be allowed.
+            </p>
+          )}
+
+          {isStudentUnverified && (
+            <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-500 rounded-xl flex items-center gap-2 text-left">
+              <ShieldAlert size={20} className="flex-shrink-0" />
+              <span>
+                <strong>Access Restricted:</strong> This account is <em>Not Fully Verified</em>. You must complete live facial security verification below to unlock access and submit attendance.
+              </span>
+            </div>
+          )}
+
+          <div className="space-y-2 text-left max-w-xs mx-auto">
+            <div>
+              <label className="font-bold block mb-1">Select Your Name</label>
+              <select
+                value={selectedStudentId}
+                onChange={(e) => setSelectedStudentId(e.target.value)}
+                className="w-full border dark:border-gray-700 rounded-xl p-2.5 bg-white dark:bg-gray-900 font-bold"
+                required
+              >
+                <option value="">-- Select Your Name --</option>
+                {sectionStudents.map((st: any) => (
+                  <option key={st.id} value={st.id}>
+                    {st.name} {st.isVerified || st.photoUrl ? '✓ (Fully Verified)' : '🔒 (Not Fully Verified)'}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {attendanceType === 'In' && (
+              <div>
+                <label className="font-bold block mb-1">Student Password</label>
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  placeholder="Enter your password"
+                  value={passwordInput}
+                  onChange={(e) => setPasswordInput(e.target.value)}
+                  className="w-full border dark:border-gray-700 rounded-xl p-2.5 bg-white dark:bg-gray-900 font-bold"
+                  required
+                />
+              </div>
+            )}
+          </div>
+
+          {errorMessage && (
+            <p role="alert" className="text-rose-500 font-bold">
+              {errorMessage}
+            </p>
+          )}
+
           <button
-            id="btn-sync-time"
             type="button"
-            onClick={handleSetToCurrentTime}
-            className="inline-flex items-center gap-1 text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 font-semibold cursor-pointer py-1"
+            onClick={handleCaptureAndVerifyFace}
+            disabled={!cameraActive || isVerifying}
+            className="w-full bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition shadow flex items-center justify-center gap-2"
           >
-            <RefreshCw size={12} />
-            <span>Reset to Current Clock</span>
+            <Lock size={16} />
+            <span>{isVerifying ? 'Verifying & Unlocking...' : 'Verify Face & Unlock Access'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={resetPortal}
+            className="text-gray-500 dark:text-gray-400 underline hover:text-gray-700 dark:hover:text-gray-200"
+          >
+            Cancel
           </button>
         </div>
+      )}
 
-        <button
-          id="btn-submit-attendance"
-          type="submit"
-          disabled={!selectedSectionId || !selectedStudentId}
-          className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-200 dark:disabled:bg-gray-800 disabled:text-gray-400 text-white font-bold text-sm py-3 px-4 rounded-xl transition duration-150 shadow-xs cursor-pointer"
-        >
-          <Send size={16} />
-          <span>Submit Arrival Records</span>
-        </button>
+      {step === 'success' && (
+        <div className="text-center space-y-4 py-8">
+          <CheckCircle2 size={64} className="text-green-500 mx-auto" />
 
-      </form>
+          <h3 className="text-xl font-bold">
+            Account Fully Verified &amp; Access Granted!
+          </h3>
 
-      <AttendanceResultModal
-        popupData={popupData}
-        studentPhotoUrl={selectedStudent?.photoUrl}
-        onClose={handleClosePopupAndReset}
-      />
+          {verifiedStudent && (
+            <p className="text-sm font-semibold">
+              {verifiedStudent.name}
+            </p>
+          )}
 
+          <p className="text-xs text-gray-500">
+            Facial verification successful. Your account is now fully unlocked and attendance recorded.
+          </p>
+
+          <button
+            type="button"
+            onClick={resetPortal}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl text-xs font-bold transition shadow"
+          >
+            Done / Submit Another
+          </button>
+        </div>
+      )}
+
+      {step === 'failed' && (
+        <div className="text-center space-y-4 py-8">
+          <AlertCircle size={64} className="text-rose-500 mx-auto" />
+
+          <h3 className="text-xl font-bold text-rose-600">
+            Access Denied: Verification Required
+          </h3>
+
+          <p role="alert" className="text-xs text-rose-500">
+            {errorMessage || 'You cannot access the portal or submit attendance until your account is fully verified through facial security.'}
+          </p>
+
+          <button
+            type="button"
+            onClick={resetPortal}
+            className="bg-gray-800 hover:bg-gray-900 text-white px-6 py-2.5 rounded-xl text-xs font-bold transition shadow"
+          >
+            Back to Verification
+          </button>
+        </div>
+      )}
     </div>
   );
 }

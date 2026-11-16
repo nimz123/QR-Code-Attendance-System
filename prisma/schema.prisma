@@ -1,74 +1,95 @@
-generator client {
-  provider = "prisma-client-js"
-}
-
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
+generator client {
+  provider = "prisma-client-js"
+}
+
 model Teacher {
-  id             Int      @id @default(autoincrement())
-  username       String   @unique
-  passwordHash   String
-  name           String
-  photo          String?
-  room           String?
-  subject        String?
-
-  sections       Section[]
-
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id           Int      @id @default(autoincrement())
+  name         String
+  username     String   @unique
+  passwordHash String
+  email        String?  // Gidugang para sa tinuod nga email address
+  photo        String?  // Gidugang para sa profile picture
+  room         String?
+  subject      String?
+  sections     Section[]
+  records      AttendanceRecord[]
+  messages     StudentMessage[]
+  securityLogs SecurityLog[]
+  createdAt    DateTime @default(now())
 }
 
 model Section {
-  id         String @id
-  name       String
-  startTime  String
-
-  teacherId  Int
-  teacher    Teacher @relation(fields: [teacherId], references: [id], onDelete: Cascade)
-
-  students   Student[]
-  records    AttendanceRecord[]
-
-  @@index([teacherId])
+  id               String             @id @default(uuid()) 
+  name             String
+  startTime        String
+  endTime          String
+  absentCutoffTime String
+  teacherId        Int
+  teacher          Teacher            @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  students         Student[]
+  records          AttendanceRecord[]
+  qrSessions       QRSession[]
+  createdAt        DateTime           @default(now())
 }
 
 model Student {
-  id           String @id
+  id           String             @id
   name         String
-  username     String @unique
+  username     String             @unique
   passwordHash String
   photoUrl     String?
-
-  sectionId  String
-  section    Section @relation(fields: [sectionId], references: [id], onDelete: Cascade)
-
-  records    AttendanceRecord[]
+  isVerified   Boolean            @default(false)
+  sectionId    String
+  section      Section            @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  records      AttendanceRecord[]
+  createdAt    DateTime           @default(now())
 }
 
 model AttendanceRecord {
-  id           String @id
+  id        String   @id
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  sectionId String
+  section   Section  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  teacherId Int
+  teacher   Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  type      String   // "In" or "Out"
+  status    String   // "Present", "Late", "Absent"
+  date      String
+  time      String
+  photoUrl  String?
+  timestamp DateTime @default(now())
+}
 
-  studentId    String
-  student      Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+model QRSession {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique
+  sectionId String
+  section   Section  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  type      String   // "In" or "Out"
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
 
-  sectionId    String
-  section      Section @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+model StudentMessage {
+  id        String   @id @default(uuid())
+  teacherId Int
+  teacher   Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  studentId String
+  content   String
+  timestamp DateTime @default(now())
+}
 
-  teacherId    Int
-
-  studentName  String
-  sectionName  String
-
-  date         String
-  time         String
-  status       String
-  type         String
-
-  timestamp    DateTime
-
-  @@index([teacherId])
+model SecurityLog {
+  id          String   @id @default(uuid())
+  teacherId   Int
+  teacher     Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  teacherName String
+  action      String
+  timestamp   DateTime @default(now())
 }
