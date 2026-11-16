@@ -6,8 +6,15 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { PrismaClient } from '@prisma/client';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname = (() => {
+  try {
+    // @ts-ignore
+    if (typeof __dirname !== 'undefined') return __dirname;
+    return path.dirname(fileURLToPath(import.meta.url));
+  } catch {
+    return process.cwd();
+  }
+})();
 
 const prisma = new PrismaClient({
   datasources: {
@@ -460,7 +467,7 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', message: 'API is running smoothly' });
 });
 
-// --- RENDER STATIC FILES & SPA FALLBACK (FIXED) ---
+// --- RENDER STATIC FILES & SPA FALLBACK ---
 app.use(express.static(__dirname));
 
 app.get('*', (req, res) => {
