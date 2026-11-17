@@ -1,12 +1,23 @@
-import React from 'react';
-import { Info, Users, Cpu, ShieldCheck, ArrowLeft, QrCode, Lock, CheckCircle2, School, Image as ImageIcon, Award } from 'lucide-react';
+import React, { useState } from 'react';
+import { Info, Cpu, ShieldCheck, ArrowLeft, QrCode, Lock, CheckCircle2, School, Image as ImageIcon, Award, X } from 'lucide-react';
 
 interface AboutUsProps {
   onBackToHome: () => void;
 }
 
+interface TeamMember {
+  name: string;
+  role: string;
+  badgeColor: string;
+  src?: string;
+  bio?: string;
+}
+
 export default function AboutUs({ onBackToHome }: AboutUsProps) {
-  // Permanent research documentation pictures (Using standard .jpg extension)
+  // State para sa modal popup kon kinsang miyembro ang gi-klik
+  const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
+
+  // Permanent research documentation pictures
   const docImages = [
     {
       src: '/photo1.jpg',
@@ -30,8 +41,89 @@ export default function AboutUs({ onBackToHome }: AboutUsProps) {
     }
   ];
 
+  // 11-Member Research Team List with individual profile image paths (.jpg)
+  const teamMembers: TeamMember[] = [
+    { 
+      name: 'Daniel Klint Dakay', 
+      role: 'Team Leader', 
+      badgeColor: 'bg-indigo-600 text-white', 
+      src: '/Daniel.jpg', 
+      bio: 'CTU Pinamungajan Research Team Leader' 
+    },
+    { 
+      name: 'Lorenzo Birao', 
+      role: 'Assistant Leader', 
+      badgeColor: 'bg-indigo-500 text-white', 
+      src: '/Lorenzo.jpg', 
+      bio: 'Assistant Team Leader & Coordinator' 
+    },
+    { 
+      name: 'Glenn Siaboc', 
+      role: 'UI Designer', 
+      badgeColor: 'bg-slate-800 text-white', 
+      src: '/Gleen.jpg', 
+      bio: 'User Interface & Visual Designer' 
+    },
+    { 
+      name: 'Reymark Napoles', 
+      role: 'Programmer', 
+      badgeColor: 'bg-slate-800 text-white', 
+      src: '/reymark.jpg', 
+      bio: 'Lead System Programmer & Backend Developer' 
+    },
+    { 
+      name: 'John Merce Cano', 
+      role: 'Developer', 
+      badgeColor: 'bg-slate-800 text-white', 
+      src: '/johnmerce.jpg', 
+      bio: 'Full-stack System Developer' 
+    },
+    { 
+      name: 'Charles Christian Gallogo', 
+      role: 'Team Member', 
+      badgeColor: 'bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-200 dark:border-gray-700',
+      src: '/charles.jpg',
+      bio: 'Research Team Member' 
+    },
+    { 
+      name: 'Rey Hilardo', 
+      role: 'Team Member', 
+      badgeColor: 'bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-200 dark:border-gray-700',
+      src: '/rey.jpg',
+      bio: 'Research Team Member' 
+    },
+    { 
+      name: 'Georhyb Cais', 
+      role: 'Team Member', 
+      badgeColor: 'bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-200 dark:border-gray-700',
+      src: '/georhyb.jpg',
+      bio: 'Research Team Member' 
+    },
+    { 
+      name: 'John Carlo Llamos', 
+      role: 'Team Member', 
+      badgeColor: 'bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-200 dark:border-gray-700',
+      src: '/johncarlo.jpg',
+      bio: 'Research Team Member' 
+    },
+    { 
+      name: 'James Roxas', 
+      role: 'Team Member', 
+      badgeColor: 'bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-200 dark:border-gray-700',
+      src: '/james.jpg',
+      bio: 'Research Team Member' 
+    },
+    { 
+      name: 'Nathaniel Ponting', 
+      role: 'Team Member', 
+      badgeColor: 'bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-200 dark:border-gray-700',
+      src: '/nathaniel.jpg',
+      bio: 'Research Team Member' 
+    },
+  ];
+
   return (
-    <div className="max-w-4xl mx-auto bg-white dark:bg-gray-900 rounded-3xl border border-gray-100 dark:border-gray-800 p-6 sm:p-10 shadow-2xl space-y-8 my-6 animate-fadeIn">
+    <div className="max-w-4xl mx-auto bg-white dark:bg-gray-900 rounded-3xl border border-gray-100 dark:border-gray-800 p-6 sm:p-10 shadow-2xl space-y-8 my-6 animate-fadeIn relative">
       
       {/* HEADER & BACK BUTTON */}
       <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-6">
@@ -89,7 +181,6 @@ export default function AboutUs({ onBackToHome }: AboutUsProps) {
         </h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          
           <div className="p-5 bg-indigo-50/50 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900 rounded-2xl space-y-2">
             <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 font-bold text-sm">
               <ShieldCheck size={18} />
@@ -129,74 +220,36 @@ export default function AboutUs({ onBackToHome }: AboutUsProps) {
               The system automatically calculates arrival times and marks attendance records as Present, Late, or Time Out based on schedules.
             </p>
           </div>
-
         </div>
       </div>
 
-      {/* TEAM MEMBERS DIRECTORY */}
+      {/* TEAM MEMBERS DIRECTORY (CLICKABLE) */}
       <div className="space-y-4">
-        <h2 className="text-lg font-black text-gray-900 dark:text-white flex items-center gap-2">
-          <Award size={20} className="text-indigo-500" />
-          <span>Our 11-Member Research Team</span>
-        </h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-black text-gray-900 dark:text-white flex items-center gap-2">
+            <Award size={20} className="text-indigo-500" />
+            <span>Our 11-Member Research Team</span>
+          </h2>
+          <span className="text-[11px] text-indigo-600 dark:text-indigo-400 font-bold">
+            (I-klik ang ngalan para Makita ang Hulagway)
+          </span>
+        </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-          
-          <div className="p-4 bg-indigo-600 text-white rounded-2xl shadow-md space-y-1">
-            <span className="text-[10px] uppercase font-mono tracking-wider opacity-80 font-bold">Team Leader</span>
-            <h4 className="font-extrabold text-sm">Daniel Klint Dakay</h4>
-          </div>
-
-          <div className="p-4 bg-indigo-500 text-white rounded-2xl shadow-md space-y-1">
-            <span className="text-[10px] uppercase font-mono tracking-wider opacity-80 font-bold">Assistant Leader</span>
-            <h4 className="font-extrabold text-sm">Lorenzo Birao</h4>
-          </div>
-
-          <div className="p-4 bg-slate-800 text-white rounded-2xl shadow-md space-y-1">
-            <span className="text-[10px] uppercase font-mono tracking-wider text-indigo-300 font-bold">UI Designer</span>
-            <h4 className="font-extrabold text-sm">Glenn Siaboc</h4>
-          </div>
-
-          <div className="p-4 bg-slate-800 text-white rounded-2xl shadow-md space-y-1">
-            <span className="text-[10px] uppercase font-mono tracking-wider text-indigo-300 font-bold">Programmer</span>
-            <h4 className="font-extrabold text-sm">Reymark Napoles</h4>
-          </div>
-
-          <div className="p-4 bg-slate-800 text-white rounded-2xl shadow-md space-y-1">
-            <span className="text-[10px] uppercase font-mono tracking-wider text-indigo-300 font-bold">Developer</span>
-            <h4 className="font-extrabold text-sm">John Merce Cano</h4>
-          </div>
-
-          <div className="p-4 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl space-y-1">
-            <span className="text-[10px] uppercase font-mono tracking-wider text-gray-400 font-bold">Team Member</span>
-            <h4 className="font-extrabold text-sm">Charles Christian Gallogo</h4>
-          </div>
-
-          <div className="p-4 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl space-y-1">
-            <span className="text-[10px] uppercase font-mono tracking-wider text-gray-400 font-bold">Team Member</span>
-            <h4 className="font-extrabold text-sm">Rey Hilardo</h4>
-          </div>
-
-          <div className="p-4 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl space-y-1">
-            <span className="text-[10px] uppercase font-mono tracking-wider text-gray-400 font-bold">Team Member</span>
-            <h4 className="font-extrabold text-sm">Georhyb Cais</h4>
-          </div>
-
-          <div className="p-4 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl space-y-1">
-            <span className="text-[10px] uppercase font-mono tracking-wider text-gray-400 font-bold">Team Member</span>
-            <h4 className="font-extrabold text-sm">John Carlo Llamos</h4>
-          </div>
-
-          <div className="p-4 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl space-y-1">
-            <span className="text-[10px] uppercase font-mono tracking-wider text-gray-400 font-bold">Team Member</span>
-            <h4 className="font-extrabold text-sm">James Roxas</h4>
-          </div>
-
-          <div className="p-4 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl space-y-1 sm:col-span-2 md:col-span-1">
-            <span className="text-[10px] uppercase font-mono tracking-wider text-gray-400 font-bold">Team Member</span>
-            <h4 className="font-extrabold text-sm">Nathaniel Ponting</h4>
-          </div>
-
+          {teamMembers.map((member, index) => (
+            <div 
+              key={index} 
+              onClick={() => setSelectedMember(member)}
+              className={`p-4 rounded-2xl shadow-md space-y-1 cursor-pointer hover:scale-[1.02] hover:shadow-lg transition group ${member.badgeColor}`}
+            >
+              <span className="text-[10px] uppercase font-mono tracking-wider opacity-80 font-bold block">
+                {member.role}
+              </span>
+              <h4 className="font-extrabold text-sm group-hover:underline decoration-dotted">
+                {member.name}
+              </h4>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -214,7 +267,11 @@ export default function AboutUs({ onBackToHome }: AboutUsProps) {
         {/* IMAGE GALLERY GRID */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 pt-2">
           {docImages.map((item, index) => (
-            <div key={index} className="group relative bg-gray-100 dark:bg-gray-800 rounded-2xl overflow-hidden border border-gray-200 dark:border-gray-700 shadow-md aspect-video">
+            <div 
+              key={index} 
+              onClick={() => setSelectedMember({ name: item.caption, role: 'Documentation Photo', badgeColor: '', src: item.src, bio: 'CTU Pinamungajan Research Project Documentation' })}
+              className="group relative bg-gray-100 dark:bg-gray-800 rounded-2xl overflow-hidden border border-gray-200 dark:border-gray-700 shadow-md aspect-video cursor-pointer"
+            >
               <img
                 src={item.src}
                 alt={item.caption}
@@ -243,7 +300,6 @@ export default function AboutUs({ onBackToHome }: AboutUsProps) {
             </p>
           </div>
           
-          {/* CTU LOGO REPLACING THE PROFILE ICON */}
           <div className="bg-white/10 p-2 rounded-2xl backdrop-blur-xs border border-white/10 shrink-0 flex items-center justify-center">
             <img 
               src="/Ctulogo.jpg" 
@@ -264,6 +320,53 @@ export default function AboutUs({ onBackToHome }: AboutUsProps) {
           Return to Attendance Portal
         </button>
       </div>
+
+      {/* POPUP MODAL WHEN A TEAM MEMBER IS CLICKED */}
+      {selectedMember && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fadeIn">
+          <div className="bg-gray-900 border border-gray-800 rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden p-6 text-center space-y-4 relative">
+            
+            <button 
+              onClick={() => setSelectedMember(null)}
+              className="absolute top-4 right-4 text-gray-400 hover:text-white bg-gray-800 p-2 rounded-full transition cursor-pointer"
+            >
+              <X size={18} />
+            </button>
+
+            {/* Avatar / Photo */}
+            <div className="w-32 h-32 mx-auto rounded-full bg-indigo-950 border-4 border-indigo-500 overflow-hidden shadow-xl flex items-center justify-center">
+              {selectedMember.src ? (
+                <img 
+                  src={selectedMember.src} 
+                  alt={selectedMember.name} 
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    // Fallback kon wala pa na-upload ang .jpg file
+                    (e.target as HTMLElement).style.display = 'none';
+                  }} 
+                />
+              ) : null}
+              <span className="text-4xl font-black text-indigo-300 uppercase absolute -z-10">
+                {selectedMember.name.charAt(0)}
+              </span>
+            </div>
+
+            {/* Details */}
+            <div className="space-y-1">
+              <h3 className="text-xl font-bold text-white">{selectedMember.name}</h3>
+              <p className="text-xs font-semibold text-indigo-400 uppercase tracking-wide">{selectedMember.role}</p>
+              <p className="text-xs text-gray-400 pt-2">{selectedMember.bio || 'Member of the CTU Pinamungajan Research & Development Team.'}</p>
+            </div>
+
+            <button
+              onClick={() => setSelectedMember(null)}
+              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-md cursor-pointer"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
 
     </div>
   );

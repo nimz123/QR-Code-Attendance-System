@@ -31,14 +31,12 @@ type ViewName =
   | 'my-attendance'
   | 'about';
 
-// Helper function to map user roles to their respective view names
 function roleView(role: AuthUser['role']): ViewName {
   if (role === 'admin') return 'admin';
   if (role === 'teacher') return 'teacher';
   return 'my-attendance';
 }
 
-// Dark Mode Toggle Component
 function DarkModeToggle() {
   const [isDarkMode, setIsDarkMode] = useState(() => {
     return (
@@ -89,7 +87,6 @@ export default function App() {
   const [teacherSections, setTeacherSections] = useState<Section[]>([]);
   const [teacherRecords, setTeacherRecords] = useState<AttendanceRecord[]>([]);
 
-  // Immediately initialize auth user from localStorage to prevent check-in flashing on reload
   const [authUser, setAuthUser] = useState<AuthUser | null>(() => {
     try {
       const savedUser = localStorage.getItem('authUser');
@@ -99,7 +96,6 @@ export default function App() {
     }
   });
 
-  // Immediately initialize current view based on saved user role if available
   const [currentView, setCurrentView] = useState<ViewName>(() => {
     try {
       const savedUser = localStorage.getItem('authUser');
@@ -114,7 +110,6 @@ export default function App() {
   const [preselectedSectionId, setPreselectedSectionId] =
     useState<string | null>(null);
 
-  // Teacher security modal settings state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [newTeacherUsername, setNewTeacherUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -122,8 +117,6 @@ export default function App() {
   const [isSavingSecurity, setIsSavingSecurity] = useState(false);
 
   const [currentTime, setCurrentTime] = useState(new Date());
-
-  // ===================== PUBLIC STATE =====================
 
   const fetchPublicState = async () => {
     try {
@@ -136,8 +129,6 @@ export default function App() {
       console.error('Failed to load public state:', error);
     }
   };
-
-  // ===================== TEACHER STATE =====================
 
   const fetchTeacherState = async () => {
     try {
@@ -164,8 +155,6 @@ export default function App() {
     }
   };
 
-  // ===================== INITIAL AUTHENTICATION & TOKEN VALIDATION =====================
-
   useEffect(() => {
     let active = true;
 
@@ -174,7 +163,6 @@ export default function App() {
         const token = localStorage.getItem('token');
         if (!token) return;
 
-        // Verify token with backend server
         const { ok, data } = await apiFetch('/api/auth/me');
 
         if (!active || !ok || !data.success || !data.user) {
@@ -203,14 +191,12 @@ export default function App() {
     };
   }, []);
 
-  // Fetch public states periodically
   useEffect(() => {
     fetchPublicState();
     const interval = window.setInterval(fetchPublicState, 5000);
     return () => window.clearInterval(interval);
   }, []);
 
-  // Fetch teacher states periodically if logged in as teacher
   useEffect(() => {
     if (authUser?.role !== 'teacher') return;
 
@@ -219,7 +205,6 @@ export default function App() {
     return () => window.clearInterval(interval);
   }, [authUser?.role]);
 
-  // Live classroom clock update timer
   useEffect(() => {
     const timer = window.setInterval(() => {
       setCurrentTime(new Date());
@@ -227,8 +212,6 @@ export default function App() {
 
     return () => window.clearInterval(timer);
   }, []);
-
-  // ===================== LOGIN / LOGOUT =====================
 
   const handleLoginSuccess = (user: AuthUser) => {
     setAuthUser(user);
@@ -241,7 +224,6 @@ export default function App() {
     } catch (error) {
       console.error('Logout error:', error);
     } finally {
-      // Clear local storage session credentials
       localStorage.removeItem('authUser');
       localStorage.removeItem('token');
       localStorage.removeItem('teacher_username');
@@ -257,8 +239,6 @@ export default function App() {
       setCurrentView('login');
     }
   };
-
-  // ===================== SECTION MANAGEMENT =====================
 
   const handleAddSection = async (name: string, startTime: string) => {
     try {
@@ -323,8 +303,6 @@ export default function App() {
       alert('Unable to update section time.');
     }
   };
-
-  // ===================== STUDENT MANAGEMENT =====================
 
   const handleDeleteStudent = async (
     sectionId: string,
@@ -395,8 +373,6 @@ export default function App() {
       alert('Unable to update student photo.');
     }
   };
-
-  // ===================== ATTENDANCE =====================
 
   const handleClearRecords = async () => {
     if (!window.confirm('Are you sure you want to clear all attendance records?')) {
@@ -479,8 +455,6 @@ export default function App() {
 
     return { status, startTime };
   };
-
-  // ===================== TEACHER SECURITY SETTINGS =====================
 
   const openSecuritySettings = () => {
     if (authUser?.role !== 'teacher') return;
@@ -576,45 +550,63 @@ export default function App() {
     >
       <header
         id="app-navbar"
-        className={`border-b border-gray-100/20 dark:border-gray-800/20 py-4 px-4 sm:px-6 sticky top-0 z-40 backdrop-blur-md transition-colors ${
+        className={`border-b border-gray-100/20 dark:border-gray-800/25 py-3 px-3 sm:px-6 sticky top-0 z-40 backdrop-blur-md transition-colors ${
           isPublicView
-            ? 'bg-white/70 dark:bg-gray-900/70'
-            : 'bg-white dark:bg-gray-900'
+            ? 'bg-white/85 dark:bg-gray-900/85 shadow-sm'
+            : 'bg-white dark:bg-gray-900 shadow-sm'
         }`}
       >
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-          <div className="bg-white/10 p-1.5 rounded-xl border border-gray-200 dark:border-gray-700 flex items-center justify-center shrink-0">
-  <img 
-    src="/Ctulogo.jpg" 
-    alt="CTU Logo" 
-    className="w-10 h-10 object-contain rounded-lg" 
-  />
-</div>
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3">
+          
+          {/* TOP ROW FOR MOBILE: LOGO & CLOCK */}
+          <div className="w-full md:w-auto flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="bg-white/10 p-1 rounded-xl border border-gray-200 dark:border-gray-700 flex items-center justify-center shrink-0">
+                <img 
+                  src="/Ctulogo.jpg" 
+                  alt="CTU Logo" 
+                  className="w-8 h-8 sm:w-10 sm:h-10 object-contain rounded-lg" 
+                />
+              </div>
 
-            <div>
-              <span className="font-display font-black text-lg text-gray-900 dark:text-white tracking-tight block">
-                EDULECTRICAL-ATTENDANCE-SYSTEM
-              </span>
+              <div>
+                <span className="font-display font-black text-xs sm:text-sm text-gray-900 dark:text-white tracking-tight block leading-tight">
+                  EDULECTRICAL-ATTENDANCE-SYSTEM
+                </span>
 
-              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 mt-0.5">
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 mt-0.5">
                   <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
-                  <span className="text-[10px] text-gray-400 dark:text-gray-500 font-mono tracking-wider font-semibold uppercase">
+                  <span className="text-[9px] sm:text-[10px] text-gray-400 dark:text-gray-500 font-mono tracking-wider font-semibold uppercase">
                     System Live
                   </span>
                 </div>
               </div>
             </div>
+
+            {/* CLOCK WIDGET FOR MOBILE */}
+            <div
+              id="live-clock-widget-mobile"
+              className="flex md:hidden items-center gap-1.5 bg-gray-50/90 dark:bg-gray-800/90 border border-gray-200 dark:border-gray-700 rounded-xl px-2.5 py-1 text-[11px] text-gray-600 dark:text-gray-300 font-mono font-medium shadow-xs"
+            >
+              <Clock size={12} className="text-indigo-600 dark:text-indigo-400 animate-pulse shrink-0" />
+              <strong className="text-gray-900 dark:text-gray-100 font-bold">
+                {currentTime.toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit',
+                })}
+              </strong>
+            </div>
           </div>
 
+          {/* CLOCK WIDGET FOR DESKTOP */}
           <div
-            id="live-clock-widget"
-            className="hidden md:flex items-center gap-2.5 bg-gray-50/80 dark:bg-gray-800/80 border border-gray-100 dark:border-gray-700 rounded-2xl px-4 py-1.5 text-xs text-gray-500 dark:text-gray-400 font-mono font-medium shadow-xs backdrop-blur-xs"
+            id="live-clock-widget-desktop"
+            className="hidden md:flex items-center gap-2 bg-gray-50/90 dark:bg-gray-800/90 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-1 text-xs text-gray-600 dark:text-gray-300 font-mono font-medium shadow-xs"
           >
-            <Clock size={14} className="text-indigo-600 dark:text-indigo-400 animate-pulse" />
-            <span>Classroom Clock:</span>
-            <strong className="text-gray-900 dark:text-gray-100">
+            <Clock size={14} className="text-indigo-600 dark:text-indigo-400 animate-pulse shrink-0" />
+            <span>Time:</span>
+            <strong className="text-gray-900 dark:text-gray-100 font-bold">
               {currentTime.toLocaleTimeString([], {
                 hour: '2-digit',
                 minute: '2-digit',
@@ -623,12 +615,13 @@ export default function App() {
             </strong>
           </div>
 
-          <div className="flex items-center gap-3">
-            {/* ABOUT US BUTTON */}
+          {/* NAVIGATION BUTTONS & ACTIONS */}
+          <div className="w-full md:w-auto flex items-center justify-center sm:justify-end gap-2 flex-wrap">
+            {/* ABOUT US BUTTON - NAKITA NA ANG WORD NGA ABOUT US */}
             <button
               type="button"
               onClick={() => setCurrentView('about')}
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition shadow-xs cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-xs cursor-pointer ${
                 currentView === 'about'
                   ? 'bg-indigo-600 text-white'
                   : 'bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900'
@@ -640,12 +633,12 @@ export default function App() {
 
             <DarkModeToggle />
 
-            <div className="flex items-center gap-2.5 bg-gray-100/80 dark:bg-gray-800/80 p-1 rounded-2xl border border-gray-200 dark:border-gray-700 backdrop-blur-xs">
+            <div className="flex items-center gap-1 bg-gray-100/90 dark:bg-gray-800/90 p-1 rounded-xl border border-gray-200 dark:border-gray-700">
               <button
                 id="switch-to-checkin-btn"
                 type="button"
                 onClick={() => setCurrentView('checkin')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all duration-150 cursor-pointer ${
+                className={`flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-bold transition-all duration-150 cursor-pointer ${
                   currentView === 'checkin'
                     ? 'bg-white dark:bg-gray-700 text-indigo-700 dark:text-indigo-300 shadow-xs'
                     : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
@@ -663,7 +656,7 @@ export default function App() {
                     authUser ? roleView(authUser.role) : 'login'
                   )
                 }
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all duration-150 cursor-pointer ${
+                className={`flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-bold transition-all duration-150 cursor-pointer ${
                   currentView !== 'checkin' && currentView !== 'about'
                     ? 'bg-indigo-600 text-white shadow-xs'
                     : 'text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400'
@@ -673,15 +666,16 @@ export default function App() {
                 <span>
                   {authUser
                     ? isTeacher
-                      ? 'Teacher Dashboard'
+                      ? 'Dashboard'
                       : isStudent
                         ? 'My Attendance'
-                        : 'Admin Dashboard'
+                        : 'Admin'
                     : 'Sign In'}
                 </span>
               </button>
             </div>
           </div>
+
         </div>
       </header>
 
@@ -943,21 +937,15 @@ export default function App() {
 
       <footer
         id="app-footer"
-        className={`border-t border-gray-100/20 dark:border-gray-800/20 py-6 px-4 mt-12 text-center text-xs text-gray-600 dark:text-gray-300 transition-colors ${
+        className={`border-t border-gray-100/20 dark:border-gray-800/25 py-6 px-4 mt-12 text-center text-xs text-gray-600 dark:text-gray-300 transition-colors ${
           isPublicView
-            ? 'bg-white/70 dark:bg-gray-900/70 backdrop-blur-md'
+            ? 'bg-white/85 dark:bg-gray-900/85 backdrop-blur-md'
             : 'bg-white dark:bg-gray-900'
         }`}
       >
-        <div className="max-w-7xl mx-auto space-y-1.5">
-          <p className="font-semibold text-gray-700 dark:text-gray-200">
-            QR Attendance Portal — Secure School Management
-          </p>
-          <p className="text-gray-500 dark:text-gray-400">
-            Developed by BIT-ELECTRICAL 3-5 for students to log student arrival
-            punctuality.
-          </p>
-        </div>
+        <p className="font-medium">
+          &copy; {new Date().getFullYear()} CTU Pinamungajan Campus &bull; Edulectrical Attendance System
+        </p>
       </footer>
     </div>
   );
