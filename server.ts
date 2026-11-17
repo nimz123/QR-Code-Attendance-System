@@ -53,8 +53,37 @@ async function seedAdmin() {
       });
       console.log('🔄 Admin account verified.');
     }
+
+    // --- AUTOMATIC SAMPLE TEACHER SEEDING PARA SA PRODUCTION ---
+    const teacherCount = await prisma.teacher.count({
+      where: { username: { not: 'admin' } }
+    });
+
+    if (teacherCount === 0) {
+      const sampleTeacherPassword = await bcrypt.hash('teacher123', 10);
+      await prisma.teacher.create({
+        data: {
+          name: 'Sample Teacher',
+          username: 'teacher1',
+          passwordHash: sampleTeacherPassword,
+          email: 'teacher1@school.edu',
+          room: 'Lab 1',
+          subject: 'Computer System',
+          sections: {
+            create: [
+              {
+                name: 'BIT-CT 1-2A',
+                startTime: '08:00',
+                endTime: '12:00'
+              }
+            ]
+          }
+        }
+      });
+      console.log('✨ Sample teacher created: teacher1 / teacher123 with section BIT-CT 1-2A');
+    }
   } catch (err) {
-    console.error('Error seeding admin:', err);
+    console.error('Error seeding admin/teachers:', err);
   }
 }
 
