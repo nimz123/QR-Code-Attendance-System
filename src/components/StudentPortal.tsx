@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Section } from '../types';
+import { apiFetch } from '../services/api';
 import {
   ArrowRight,
   CheckCircle2,
@@ -72,16 +73,15 @@ export default function StudentPortal({
   const [sections, setSections] = useState<any[]>(propSections || []);
   const [teachersList, setTeachersList] = useState<any[]>([]);
 
-  // Fetch teachers and sections directly from public API to ensure dropdowns are populated
+  // Fetch teachers and sections directly using apiFetch to ensure dropdowns are populated
   useEffect(() => {
     const fetchPublicData = async () => {
       try {
-        const res = await fetch('http://localhost:5001/api/state/public');
-        const data = await res.json();
-        if (data.success) {
-          setTeachersList(data.teachers || []);
-          if (data.sections && data.sections.length > 0) {
-            setSections(data.sections);
+        const res = await apiFetch('/api/state/public');
+        if (res.ok && res.data.success) {
+          setTeachersList(res.data.teachers || []);
+          if (res.data.sections && res.data.sections.length > 0) {
+            setSections(res.data.sections);
           }
         }
       } catch (err) {
@@ -356,9 +356,8 @@ export default function StudentPortal({
     setErrorMessage('');
 
     try {
-      const response = await fetch('http://localhost:5001/api/student/verify-attendance', {
+      const res = await apiFetch('/api/student/verify-attendance', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           studentId: selectedStudent.id,
           username: selectedStudent.username || selectedStudent.name,
@@ -369,10 +368,10 @@ export default function StudentPortal({
         }),
       });
 
-      const data = await response.json();
+      const data = res.data;
 
       if (
-        !response.ok ||
+        !res.ok ||
         !data.success ||
         !data.student?.id ||
         !data.student?.name ||
