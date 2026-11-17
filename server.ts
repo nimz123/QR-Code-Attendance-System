@@ -357,6 +357,24 @@ app.get('/api/state/teacher', authenticateToken, async (req, res) => {
   }
 });
 
+// --- UPDATE TEACHER PROFILE PICTURE ENDPOINT ---
+app.put('/api/teacher/profile', authenticateToken, async (req, res) => {
+  try {
+    const teacherId = req.user.userId;
+    const { photoUrl } = req.body;
+
+    const updatedTeacher = await prisma.teacher.update({
+      where: { id: teacherId },
+      data: { photo: photoUrl },
+    });
+
+    res.json({ success: true, teacher: updatedTeacher });
+  } catch (error) {
+    console.error('🔥 Error updating teacher profile photo:', error);
+    res.status(500).json({ success: false, error: 'Failed to update profile picture' });
+  }
+});
+
 // PUBLIC STATE ENDPOINT
 app.get('/api/state/public', async (req, res) => {
   try {
@@ -381,6 +399,7 @@ app.get('/api/state/public', async (req, res) => {
         room: t.room || null,
         subject: t.subject || null,
         photo: t.photo || null,
+        photoUrl: t.photo || null,
         sectionCount: t.sections ? t.sections.length : 0,
         sections: t.sections ? t.sections.filter(Boolean).map((s) => ({
           id: s.id || s.name,
@@ -410,7 +429,7 @@ app.get('/api/state/public', async (req, res) => {
   }
 });
 
-// --- CREATE SECTION ENDPOINT (GI-DUGANG KINI) ---
+// --- CREATE SECTION ENDPOINT ---
 app.post('/api/sections', authenticateToken, async (req, res) => {
   try {
     const { name, startTime, endTime, absentCutoffTime } = req.body;
@@ -461,6 +480,7 @@ app.get('/api/admin/teachers', async (req, res) => {
         room: t.room || null,
         subject: t.subject || null,
         photo: t.photo || null,
+        photoUrl: t.photo || null,
         sectionCount: t.sections ? t.sections.length : 0,
         sections: t.sections ? t.sections.filter(Boolean).map((s) => ({
           id: s.id || s.name,
