@@ -94,7 +94,7 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
       const currentToken = getAuthToken();
       if (!currentToken) return;
 
-      const profileRes = await fetch("http://localhost:5001/api/auth/me", {
+      const profileRes = await fetch("/api/auth/me", {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${currentToken}`,
@@ -113,7 +113,7 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
         localStorage.setItem("user", JSON.stringify(updatedProfile));
       }
 
-      const res = await fetch("http://localhost:5001/api/state/teacher", {
+      const res = await fetch("/api/state/teacher", {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${currentToken}`,
@@ -191,7 +191,7 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
         setIsEditingPhoto(false);
 
         try {
-          await fetch("http://localhost:5001/api/teacher/profile", {
+          await fetch("/api/teacher/profile", {
             method: "PUT",
             headers: authHeaders,
             body: JSON.stringify({ photoUrl: base64String }),
@@ -212,7 +212,7 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
     setLoading(true);
 
     try {
-      const res = await fetch("http://localhost:5001/api/sections", {
+      const res = await fetch("/api/sections", {
         method: "POST",
         headers: authHeaders,
         body: JSON.stringify(sectionForm),
@@ -251,7 +251,7 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
     setLoading(true);
 
     try {
-      const res = await fetch("http://localhost:5001/api/teacher/students", {
+      const res = await fetch("/api/teacher/students", {
         method: "POST",
         headers: authHeaders,
         body: JSON.stringify(studentForm),
@@ -286,7 +286,7 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
     setSuccessMsg("");
 
     try {
-      const res = await fetch(`http://localhost:5001/api/teacher/students/${studentId}`, {
+      const res = await fetch(`/api/teacher/students/${studentId}`, {
         method: "DELETE",
         headers: authHeaders,
       });
@@ -312,7 +312,7 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
     setQrLoading(true);
 
     try {
-      const res = await fetch("http://localhost:5001/api/attendance/qr-session", {
+      const res = await fetch("/api/attendance/qr-session", {
         method: "POST",
         headers: authHeaders,
         body: JSON.stringify({ sectionId: qrSectionId, type: qrType }),
@@ -381,7 +381,7 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
           onClick={triggerLogout}
           className="mt-6 w-full py-2.5 rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20 text-xs font-medium transition pointer-events-auto cursor-pointer"
         >
-         Log Out
+          Log Out
         </button>
       </div>
 
@@ -636,7 +636,7 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
               </div>
             </div>
 
-            {/* ENROLLED STUDENTS PER SECTION - CLICK SECTION OR STUDENT NAME TO SHOW/HIDE DETAILS */}
+            {/* ENROLLED STUDENTS PER SECTION */}
             <div className="bg-[#0d1322] border border-slate-800 rounded-2xl p-5 space-y-4">
               <h2 className="text-base font-semibold text-slate-200">📋 Enrolled Students per Section (Click Section or Student Name to View/Hide Details)</h2>
               {sections.length === 0 ? (
@@ -647,7 +647,6 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
                     const isExpanded = expandedSections[sec.id] || false;
                     return (
                       <div key={sec.id} className="bg-[#131b2e] border border-slate-800 rounded-xl p-4 space-y-3">
-                        {/* CLICKABLE SECTION HEADER */}
                         <div
                           onClick={() => toggleSectionDetails(sec.id)}
                           className="flex justify-between items-center border-b border-slate-800 pb-3 cursor-pointer hover:bg-slate-800/40 p-2 rounded-lg transition select-none"
@@ -665,7 +664,6 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
                           </div>
                         </div>
 
-                        {/* EXPANDED SECTION DETAILS */}
                         {isExpanded && (
                           <div className="space-y-3 pt-2">
                             <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wide">Enrolled Students (Click Student Name to Toggle Details):</h4>
@@ -678,7 +676,6 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
                                   const isStudentExpanded = expandedStudents[stu.id] || false;
                                   return (
                                     <div key={stu.id} className="bg-[#0d1322] p-3 rounded-xl border border-slate-800 space-y-3 shadow-inner">
-                                      {/* CLICKABLE STUDENT HEADER (CLICK NAME TO TOGGLE DETAILS) */}
                                       <div className="flex items-center justify-between cursor-pointer select-none" onClick={() => toggleStudentDetails(stu.id)}>
                                         <div className="flex items-center gap-2.5">
                                           {stu.photoUrl ? (
@@ -700,7 +697,7 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
                                         </div>
                                         <button 
                                           onClick={(e) => {
-                                            e.stopPropagation(); // prevent toggling student expansion when deleting
+                                            e.stopPropagation();
                                             handleDeleteStudent(stu.id, stu.name);
                                           }} 
                                           className="text-rose-400 hover:text-rose-300 text-xs cursor-pointer p-1" 
@@ -710,32 +707,28 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
                                         </button>
                                       </div>
 
-                                      {/* EXPANDED STUDENT DETAILS (Verification & Attendance Stats) */}
                                       {isStudentExpanded && (
                                         <div className="space-y-3 pt-2 border-t border-slate-800/80 animate-fadeIn">
-                                          {/* Verification Status */}
                                           <div className="flex items-center justify-between text-[10px]">
                                             <span className="text-slate-400">Verification:</span>
                                             {stu.isVerified ? (
-                                              <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full font-semibold">Fully Verified</span>
+                                              <span className="text-emerald-400 font-semibold">✅ Verified Face</span>
                                             ) : (
-                                              <span className="px-2 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full font-semibold">Not Verified</span>
+                                              <span className="text-amber-400 font-semibold">⏳ Pending Face Scan</span>
                                             )}
                                           </div>
-
-                                          {/* Attendance Stats (Present / Late / Absent) */}
-                                          <div className="grid grid-cols-3 gap-1 pt-1 text-center text-[10px]">
-                                            <div className="bg-[#131b2e] p-1.5 rounded-lg border border-slate-800">
-                                              <span className="block text-slate-400">Present</span>
-                                              <span className="font-bold text-emerald-400 text-xs">{stats.present}</span>
+                                          <div className="grid grid-cols-3 gap-1.5 text-center text-[10px]">
+                                            <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-1.5">
+                                              <span className="block text-emerald-400 font-bold text-xs">{stats.present}</span>
+                                              <span className="text-slate-400">Present</span>
                                             </div>
-                                            <div className="bg-[#131b2e] p-1.5 rounded-lg border border-slate-800">
-                                              <span className="block text-slate-400">Late</span>
-                                              <span className="font-bold text-amber-400 text-xs">{stats.late}</span>
+                                            <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-1.5">
+                                              <span className="block text-amber-400 font-bold text-xs">{stats.late}</span>
+                                              <span className="text-slate-400">Late</span>
                                             </div>
-                                            <div className="bg-[#131b2e] p-1.5 rounded-lg border border-slate-800">
-                                              <span className="block text-slate-400">Absent</span>
-                                              <span className="font-bold text-rose-400 text-xs">{stats.absent}</span>
+                                            <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg p-1.5">
+                                              <span className="block text-rose-400 font-bold text-xs">{stats.absent}</span>
+                                              <span className="text-slate-400">Absent</span>
                                             </div>
                                           </div>
                                         </div>
@@ -758,7 +751,47 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
 
         {activeTab === "records" && (
           <div className="bg-[#0d1322] border border-slate-800 rounded-2xl p-5 space-y-4">
-            <h2 className="text-base font-semibold text-slate-200">📊 Attendance Logs & History</h2>
+            <h2 className="text-base font-semibold text-indigo-400">📊 Attendance Records</h2>
+            {records.length === 0 ? (
+              <p className="text-slate-400 text-xs text-center py-6">No attendance records recorded yet.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-800 text-slate-400">
+                      <th className="py-2.5 px-3">Date</th>
+                      <th className="py-2.5 px-3">Time</th>
+                      <th className="py-2.5 px-3">Student ID</th>
+                      <th className="py-2.5 px-3">Type</th>
+                      <th className="py-2.5 px-3">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60">
+                    {records.map((rec) => (
+                      <tr key={rec.id} className="hover:bg-slate-800/30">
+                        <td className="py-2.5 px-3 font-mono">{rec.date}</td>
+                        <td className="py-2.5 px-3 font-mono">{rec.time}</td>
+                        <td className="py-2.5 px-3">{rec.studentId}</td>
+                        <td className="py-2.5 px-3">{rec.type}</td>
+                        <td className="py-2.5 px-3">
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              rec.status === "Present"
+                                ? "bg-emerald-500/20 text-emerald-400"
+                                : rec.status === "Late"
+                                  ? "bg-amber-500/20 text-amber-400"
+                                  : "bg-slate-500/20 text-slate-300"
+                            }`}
+                          >
+                            {rec.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
       </div>
