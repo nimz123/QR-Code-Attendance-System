@@ -30,6 +30,22 @@ app.use(express.json({ limit: '50mb' }));
 
 const JWT_SECRET = 'KhlarEskwela_CHANGE_THIS_TO_A_RANDOM_SECRET';
 
+// AUTHENTICATION MIDDLEWARE
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).json({ success: false, error: 'No token provided' });
+  }
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (error) {
+    return res.status(403).json({ success: false, error: 'Invalid token' });
+  }
+};
+
 async function seedAdmin() {
   try {
     const hashedPassword = await bcrypt.hash('changeme123', 10);
@@ -85,22 +101,6 @@ async function seedAdmin() {
   } catch (err) {
     console.error('Error seeding admin/teachers:', err);
   }
-}
-
-async function findSectionFlexible(identifier) {
-  if (!identifier) return null;
-  let section = await prisma.section.findUnique({
-    where: { id: identifier },
-    include: { students: { include: { records: true } }, teacher: true }
-  }).catch(() => null);
-
-  if (!section) {
-    section = await prisma.section.findFirst({
-      where: { name: { equals: identifier, mode: 'insensitive' } },
-      include: { students: { include: { records: true } }, teacher: true }
-    }).catch(() => null);
-  }
-  return section;
 }
 
 // UNIFIED LOGIN ROUTE
@@ -306,6 +306,57 @@ app.get('/api/auth/me', async (req, res) => {
   }
 });
 
+// TEACHER STATE ENDPOINT
+app.get('/api/state/teacher', authenticateToken, async (req, res) => {
+  try {
+    const teacherId = req.user.userId;
+    const teacher = await prisma.teacher.findUnique({
+      where: { id: teacherId },
+      include: {
+        sections: {
+          include: {
+            students: { include: { records: true } }
+          }
+        }
+      }
+    });
+
+    if (!teacher) {
+      return res.status(404).json({ success: false, error: 'Teacher not found' });
+    }
+
+    const sections = teacher.sections.map(s => ({
+      id: s.id,
+      name: s.name,
+      startTime: s.startTime || '08:00',
+      endTime: s.endTime || '17:00',
+      absentCutoffTime: s.absentCutoffTime || '08:30',
+      students: s.students || []
+    }));
+
+    const sectionIds = sections.map(s => s.id);
+    const records = await prisma.attendanceRecord.findMany({
+      where: { sectionId: { in: sectionIds } }
+    });
+
+    res.json({
+      success: true,
+      teacher: {
+        id: teacher.id,
+        name: teacher.name,
+        username: teacher.username,
+        email: teacher.email || `${teacher.username}@school.edu`,
+        photoUrl: teacher.photo || ''
+      },
+      sections,
+      records
+    });
+  } catch (error) {
+    console.error('Error fetching teacher state:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch teacher state' });
+  }
+});
+
 // PUBLIC STATE ENDPOINT
 app.get('/api/state/public', async (req, res) => {
   try {
@@ -339,6 +390,7 @@ app.get('/api/state/public', async (req, res) => {
           studentCount: s.students ? s.students.length : 0,
           startTime: s.startTime || '08:00',
           endTime: s.endTime || '17:00',
+          absentCutoffTime: s.absentCutoffTime || '08:30',
           students: s.students || []
         })) : []
       }));
@@ -355,6 +407,34 @@ app.get('/api/state/public', async (req, res) => {
   } catch (error) {
     console.error('Error fetching public state:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch public state' });
+  }
+});
+
+// --- CREATE SECTION ENDPOINT (GI-DUGANG KINI) ---
+app.post('/api/sections', authenticateToken, async (req, res) => {
+  try {
+    const { name, startTime, endTime, absentCutoffTime } = req.body;
+    const teacherId = req.user.userId;
+
+    if (!name) {
+      return res.status(400).json({ success: false, error: 'Section name is required' });
+    }
+
+    const newSection = await prisma.section.create({
+      data: {
+        name,
+        startTime: startTime || '08:00',
+        endTime: endTime || '17:00',
+        absentCutoffTime: absentCutoffTime || '08:30',
+        teacherId
+      },
+      include: { students: true }
+    });
+
+    res.json({ success: true, section: newSection });
+  } catch (error) {
+    console.error('🔥 Error creating section:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to create section' });
   }
 });
 
@@ -390,6 +470,7 @@ app.get('/api/admin/teachers', async (req, res) => {
           studentCount: s.students ? s.students.length : 0,
           startTime: s.startTime || '08:00',
           endTime: s.endTime || '17:00',
+          absentCutoffTime: s.absentCutoffTime || '08:30',
           students: s.students || []
         })) : []
       }));
@@ -458,7 +539,7 @@ app.delete('/api/admin/teachers/:id', async (req, res) => {
   }
 });
 
-app.post('/api/teacher/students', async (req, res) => {
+app.post('/api/teacher/students', authenticateToken, async (req, res) => {
   try {
     const { sectionId, name, username, password, photoUrl } = req.body;
     if (!sectionId || !name || !username || !password) {
