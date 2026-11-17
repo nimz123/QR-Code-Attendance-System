@@ -1,6 +1,6 @@
 /**
  * Helper function for handling API requests with automatic JWT token attachment
- * and relative path resolution through the Vite proxy.
+ * and relative path resolution through the Vite proxy/Render server.
  */
 export async function apiFetch(endpoint: string, options: RequestInit = {}) {
   // Retrieve the stored JWT authentication token

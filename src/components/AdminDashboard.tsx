@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Users, BookOpen, ShieldCheck, AlertCircle, Search, RefreshCw, UserPlus, CheckCircle, XCircle, X, ChevronDown, ChevronUp, LogOut, Trash2 } from 'lucide-react';
+import { apiFetch } from '../services/api'; 
 
 interface Student {
   id: string;
@@ -56,22 +57,22 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     try {
       setLoading(true);
       setError(null);
-      const res = await fetch('http://localhost:5001/api/admin/teachers');
-      const data = await res.json();
-      if (data.success) {
-        setTeachers(data.teachers || []);
+      
+      const res = await apiFetch('/api/admin/teachers');
+      
+      if (res.ok && res.data.success) {
+        setTeachers(res.data.teachers || []);
         const initialExpanded: { [key: string]: boolean } = {};
-        (data.teachers || []).forEach((t: Teacher) => {
+        (res.data.teachers || []).forEach((t: Teacher) => {
           initialExpanded[t.id] = true;
         });
         setExpandedTeachers(initialExpanded);
       } else {
-        const pubRes = await fetch('http://localhost:5001/api/state/public');
-        const pubData = await pubRes.json();
-        if (pubData.success) {
-          setTeachers(pubData.teachers || []);
+        const pubRes = await apiFetch('/api/state/public');
+        if (pubRes.ok && pubRes.data.success) {
+          setTeachers(pubRes.data.teachers || []);
         } else {
-          setError('Failed to fetch dashboard data');
+          setError(res.data.error || 'Failed to fetch dashboard data');
         }
       }
     } catch (err: any) {
@@ -103,22 +104,20 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     }
   };
 
-  // Function para ma-delete ang teacher
   const handleDeleteTeacher = async (teacherId: string | number, teacherName: string) => {
     if (window.confirm(`Are you sure you want to delete teacher ${teacherName}? This action cannot be undone.`)) {
       try {
         setError(null);
-        const res = await fetch(`http://localhost:5001/api/admin/teachers/${teacherId}`, {
+        const res = await apiFetch(`/api/admin/teachers/${teacherId}`, {
           method: 'DELETE',
         });
-        const data = await res.json();
-        if (res.ok && (data.success !== false)) {
+        
+        if (res.ok && (res.data.success !== false)) {
           setTeachers(teachers.filter(t => t.id !== teacherId));
-          // Kon ang nadelete nga teacher ang nag-owner sa currently selected section, i-clear sa nato ang selected section
           setSuccessMsg(`Teacher ${teacherName} deleted successfully!`);
           setTimeout(() => setSuccessMsg(null), 4000);
         } else {
-          setError(data.error || 'Failed to delete teacher.');
+          setError(res.data.error || 'Failed to delete teacher.');
         }
       } catch (err) {
         console.error('Error deleting teacher:', err);
@@ -150,19 +149,17 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       });
       setStudents(sectionInput?.students || []);
 
-      const res = await fetch(`http://localhost:5001/api/admin/sections/${encodeURIComponent(secId)}/students`);
-      const data = await res.json();
+      const res = await apiFetch(`/api/admin/sections/${encodeURIComponent(secId)}/students`);
       
-      if (data.success || Array.isArray(data.students) || Array.isArray(data)) {
-        const studentList = data.students || data.data || data.items || (Array.isArray(data) ? data : []);
+      if (res.ok && (res.data.success || Array.isArray(res.data.students) || Array.isArray(res.data))) {
+        const studentList = res.data.students || res.data.data || res.data.items || (Array.isArray(res.data) ? res.data : []);
         setStudents(studentList);
         setSelectedSection(prev => prev ? { ...prev, students: studentList } : { id: secId, name: secName, students: studentList });
       } else {
-        const fallbackRes = await fetch(`http://localhost:5001/api/admin/sections/${encodeURIComponent(secId)}`);
-        const fallbackData = await fallbackRes.json();
-        if (fallbackData.success && fallbackData.section) {
-          setSelectedSection(fallbackData.section);
-          setStudents(fallbackData.section.students || fallbackData.students || []);
+        const fallbackRes = await apiFetch(`/api/admin/sections/${encodeURIComponent(secId)}`);
+        if (fallbackRes.ok && fallbackRes.data.success && fallbackRes.data.section) {
+          setSelectedSection(fallbackRes.data.section);
+          setStudents(fallbackRes.data.section.students || fallbackRes.data.students || []);
         }
       }
     } catch (err: any) {
@@ -181,9 +178,9 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     try {
       setRegistering(true);
       setError(null);
-      const res = await fetch('http://localhost:5001/api/admin/teachers', {
+      
+      const res = await apiFetch('/api/admin/teachers', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: teacherName,
           username: teacherUsername,
@@ -194,8 +191,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         })
       });
 
-      const data = await res.json();
-      if (data.success) {
+      if (res.ok && res.data.success) {
         setSuccessMsg('Teacher registered successfully!');
         setShowAddTeacherModal(false);
         setTeacherName('');
@@ -207,7 +203,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         fetchData();
         setTimeout(() => setSuccessMsg(null), 4000);
       } else {
-        setError(data.error || 'Failed to register teacher');
+        setError(res.data.error || 'Failed to register teacher');
       }
     } catch (err) {
       console.error('Error registering teacher:', err);
@@ -297,7 +293,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                             <div className="text-xs text-gray-400">{teacher.email} {teacher.subject ? `• ${teacher.subject}` : ''}</div>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
-                            {/* DELETE TEACHER BUTTON */}
                             <button
                               onClick={() => handleDeleteTeacher(teacher.id, teacher.name)}
                               title="Delete Teacher"
