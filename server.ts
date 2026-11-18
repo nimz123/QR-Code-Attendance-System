@@ -26,6 +26,7 @@ const prisma = new PrismaClient({
 
 const app = express();
 app.use(cors());
+// 50mb limit set here to prevent network errors during base64 photo and biometric uploads
 app.use(express.json({ limit: '50mb' }));
 
 const JWT_SECRET = 'KhlarEskwela_CHANGE_THIS_TO_A_RANDOM_SECRET';
@@ -295,7 +296,7 @@ app.put('/api/sections/:id/toggle-verification', authenticateToken, async (req: 
 // Teacher Approving or Rejecting Student Attendance
 app.post('/api/teacher/approve-attendance', authenticateToken, async (req: any, res) => {
   try {
-    const { recordId, status } = req.body; // status: 'Present', 'Absent', etc.
+    const { recordId, status } = req.body;
 
     if (!recordId || !status) {
       return res.status(400).json({ success: false, error: 'Record ID and status are required.' });
@@ -403,7 +404,6 @@ app.post('/api/student/verify-attendance', async (req, res) => {
       }
     }
 
-    // One-time biometric facial identity lock (saved once and never overwritten)
     let updatedStudent = student;
     if (!student.isVerified || !student.biometricPhoto) {
       updatedStudent = await prisma.student.update({
@@ -609,7 +609,7 @@ app.delete('/api/sections/:id', authenticateToken, async (req: any, res) => {
   }
 });
 
-// Submit Attendance Record (Respects Teacher Approval Toggle)
+// Submit Attendance Record
 app.post('/api/attendance/submit', async (req: any, res) => {
   try {
     const { studentId, sectionId, type, photoUrl } = req.body;
@@ -631,7 +631,6 @@ app.post('/api/attendance/submit', async (req: any, res) => {
     const currentDate = now.toISOString().split('T')[0];
     const currentTime = now.toTimeString().split(' ')[0].substring(0, 5);
 
-    // If teacher approval toggle is ON, set status to 'Pending Approval'; otherwise automatic 'Present' or 'Late'
     let status = section.requireTeacherApproval ? 'Pending Approval' : 'Present';
 
     if (!section.requireTeacherApproval && type === 'In') {

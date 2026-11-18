@@ -19,8 +19,8 @@ interface Section {
   room?: string;
   startTime?: string;
   endTime?: string;
-  createdAt?: string; // Date when the section was created/updated
-  date?: string; // Specific date for today's classes if applicable
+  createdAt?: string;
+  date?: string;
   students?: Student[];
 }
 
@@ -224,7 +224,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             <h1 className="text-2xl font-extrabold text-white flex items-center gap-2 tracking-wide">
               <ShieldCheck className="text-indigo-400" /> Admin Dashboard
             </h1>
-            <p className="text-xs text-slate-400 mt-1">Manage college instructors, monitor real-time online/absent status within the day, and inspect student logs.</p>
+            <p className="text-xs text-slate-400 mt-1">Manage college instructors, monitor online/absent status within the day, and inspect student logs.</p>
           </div>
           <div className="flex items-center gap-3">
             <button 
@@ -327,10 +327,10 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                     {filteredTeachers.map((teacher) => {
                       const isSelectedTeacher = selectedTeacher?.id === teacher.id;
                       
-                      // Check if the teacher has active sections created/logged TODAY (within the day)
-                      const todayStr = new Date().toISOString().split('T')[0]; // Format: YYYY-MM-DD
+                      // Check if teacher has sections created within today
+                      const todayStr = new Date().toISOString().split('T')[0];
                       const hasSectionsToday = (teacher.sections || []).some((sec: Section) => {
-                        if (!sec.createdAt && !sec.date) return true; // Fallback if timestamp missing but sections exist
+                        if (!sec.createdAt && !sec.date) return true;
                         const secDate = (sec.createdAt || sec.date || '').split('T')[0];
                         return secDate === todayStr || sec.sections?.length !== 0;
                       });
@@ -341,7 +341,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                         <div
                           key={teacher.id}
                           onClick={() => {
-                            // Toggle/deselect if clicking the already selected teacher, otherwise select them
+                            // Toggle/deselect teacher on secondary click
                             if (selectedTeacher?.id === teacher.id) {
                               setSelectedTeacher(null);
                               setSelectedSection(null);
@@ -361,24 +361,20 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                               <div className="w-10 h-10 rounded-full bg-indigo-600/30 border border-indigo-500 flex items-center justify-center font-bold text-indigo-300 text-sm">
                                 {teacher.name ? teacher.name.charAt(0).toUpperCase() : "T"}
                               </div>
-                              {/* Online / Offline status indicator dot badge for today */}
                               <span 
                                 className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-[#131b2e] ${
                                   isOnlineToday ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'
                                 }`} 
-                                title={isOnlineToday ? 'Online Today (Active Sections Created)' : 'Offline / Absent Today (No Sections Created)'}
+                                title={isOnlineToday ? 'Online Today' : 'Absent / Offline Today'}
                               />
                             </div>
                             <div>
-                              <div className="font-bold text-white text-xs flex items-center gap-1.5">
-                                <span>{teacher.name}</span>
-                              </div>
+                              <div className="font-bold text-white text-xs">{teacher.name}</div>
                               <div className="text-[10px] text-slate-400">@{teacher.username} • {teacher.sections?.length || 0} sections</div>
                             </div>
                           </div>
                           
                           <div className="flex items-center gap-2">
-                            {/* Today's status badge */}
                             {isOnlineToday ? (
                               <span className="px-2 py-0.5 rounded-md text-[9px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
                                 <Wifi size={10} /> Online
@@ -430,18 +426,17 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
 
                       return (
                         <>
-                          {/* Teacher Details Header with dynamic handled count and today's online/absent status */}
                           <div className="bg-[#131b2e] border border-slate-800 p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                             <div>
                               <div className="flex items-center gap-2">
                                 <h3 className="text-xs font-bold text-white">{selectedTeacher.name}</h3>
                                 {isOnlineToday ? (
                                   <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
-                                    <Wifi size={10} /> Online 
+                                    <Wifi size={10} /> Online Today
                                   </span>
                                 ) : (
                                   <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center gap-1">
-                                    <WifiOff size={10} /> Offline
+                                    <WifiOff size={10} /> Absent / Offline Today
                                   </span>
                                 )}
                               </div>
@@ -454,7 +449,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                             </span>
                           </div>
 
-                          {/* Assigned Sections Cards */}
                           <div className="space-y-2">
                             <div className="text-xs font-semibold text-slate-400">Assigned Sections &amp; Subjects (Click to view enrolled students)</div>
                             {(!selectedTeacher.sections || selectedTeacher.sections.length === 0) ? (
@@ -502,7 +496,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                       );
                     })()}
 
-                    {/* Students List in Selected Section */}
                     <div className="space-y-2 pt-2 border-t border-slate-800">
                       <div className="text-xs font-semibold text-slate-400">
                         {selectedSection ? `Students Enrolled in Section "${selectedSection.name}" (${selectedSection.subject || selectedTeacher.subject || 'Subject'})` : 'Select a section/subject above to view enrolled students'}
@@ -589,7 +582,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                       <div
                         key={stu.id}
                         onClick={() => {
-                          // Toggle/deselect if clicking the already selected student, otherwise select them
+                          // Toggle/deselect student on secondary click
                           if (selectedStudent?.id === stu.id) {
                             setSelectedStudent(null);
                           } else {
@@ -643,7 +636,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {/* Student Header */}
                   <div className="bg-[#131b2e] border border-slate-800 p-4 rounded-xl flex items-center justify-between">
                     <div className="flex items-center gap-4">
                       {selectedStudent.photoUrl ? (
@@ -672,7 +664,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                     </div>
                   </div>
 
-                  {/* Attendance History & Status Guardrail */}
                   <div className="space-y-3">
                     <div className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
                       <Calendar size={14} className="text-indigo-400" /> Attendance History &amp; Status
@@ -681,7 +672,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                     {!selectedStudent.isVerified && !selectedStudent.photoUrl ? (
                       <div className="text-center py-12 text-amber-400 bg-amber-500/10 rounded-xl border border-amber-500/30 text-xs p-4">
                         <AlertCircle size={24} className="mx-auto mb-2 text-amber-400 animate-pulse" />
-                        <strong>Pending Facial Verification:</strong> {selectedStudent.name} has not completed the one-time biometric facial registration yet. Attendance status (Present/Late/Absent) and detailed logs are locked until fully registered.
+                        <strong>Pending Facial Verification:</strong> {selectedStudent.name} has not completed the one-time biometric facial registration yet. Attendance status and detailed logs are locked until fully registered.
                       </div>
                     ) : (!selectedStudent.records || selectedStudent.records.length === 0) ? (
                       <div className="text-center py-16 text-slate-500 bg-[#131b2e] rounded-xl border border-slate-800 text-xs">
