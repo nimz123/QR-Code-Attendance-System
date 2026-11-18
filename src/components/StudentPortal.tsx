@@ -12,6 +12,11 @@ import {
   X,
   ShieldAlert,
   Lock,
+  Eye,
+  EyeOff,
+  User,
+  Key,
+  FileText,
 } from 'lucide-react';
 
 interface StudentPortalProps {
@@ -73,7 +78,6 @@ export default function StudentPortal({
   const [sections, setSections] = useState<any[]>(propSections || []);
   const [teachersList, setTeachersList] = useState<any[]>([]);
 
-  // Fetch teachers and sections directly using apiFetch to ensure dropdowns are populated
   useEffect(() => {
     const fetchPublicData = async () => {
       try {
@@ -96,9 +100,11 @@ export default function StudentPortal({
   );
   const [attendanceType, setAttendanceType] = useState<'In' | 'Out'>('In');
   const [selectedTeacherId, setSelectedTeacherId] = useState('');
+  const [selectedSubjectId, setSelectedSubjectId] = useState('');
   const [selectedStudentId, setSelectedStudentId] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
   const [verifiedStudent, setVerifiedStudent] = useState<{
     id: string;
     name: string;
@@ -107,6 +113,14 @@ export default function StudentPortal({
   const [cameraActive, setCameraActive] = useState(false);
   const [isScanningQR, setIsScanningQR] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
+
+  // Student Settings State
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [newProfilePhoto, setNewProfilePhoto] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -257,6 +271,7 @@ export default function StudentPortal({
     if (matchedSection) {
       stopQrCamera();
       setScannedSectionId(matchedSection.id);
+      setSelectedSubjectId(matchedSection.id);
       setErrorMessage('');
       setStep('facial_verify');
     } else {
@@ -281,20 +296,26 @@ export default function StudentPortal({
   const handleValidateManual = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    if (!scannedSectionId) {
-      setErrorMessage('Please select a teacher and subject/section.');
+    if (!selectedTeacherId) {
+      setErrorMessage('Please select a teacher.');
+      return;
+    }
+
+    if (!selectedSubjectId) {
+      setErrorMessage('Please select a subject or section.');
       return;
     }
 
     const sectionExists = sections.some(
-      (section) => section.id === scannedSectionId
+      (section) => section.id === selectedSubjectId
     );
 
     if (!sectionExists) {
-      setErrorMessage('The selected section was not found. Please try again.');
+      setErrorMessage('The selected section was not found in the database. Please refresh.');
       return;
     }
 
+    setScannedSectionId(selectedSubjectId);
     setErrorMessage('');
     setStep('facial_verify');
   };
@@ -303,7 +324,7 @@ export default function StudentPortal({
     if (isVerifying) return;
 
     if (!selectedStudentId) {
-      setErrorMessage('Please select your name from the list.');
+      setErrorMessage('Please select your name.');
       return;
     }
 
@@ -328,7 +349,7 @@ export default function StudentPortal({
     const canvas = canvasRef.current;
 
     if (!video || !canvas || !cameraActive || video.videoWidth === 0) {
-      setErrorMessage('ACCESS BLOCKED: Facial verification camera is mandatory. Please enable camera access.');
+      setErrorMessage('Camera access is required for facial verification. Please allow camera permissions.');
       setStep('failed');
       return;
     }
@@ -347,7 +368,7 @@ export default function StudentPortal({
     const capturedImage = canvas.toDataURL('image/jpeg', 0.85);
 
     if (!capturedImage || capturedImage.length < 100) {
-      setErrorMessage('Invalid facial capture. Please position your face clearly in front of the camera.');
+      setErrorMessage('Captured facial image is invalid or unclear.');
       setStep('failed');
       return;
     }
@@ -379,7 +400,7 @@ export default function StudentPortal({
       ) {
         setErrorMessage(
           data.error ||
-            'ACCESS DENIED: Account is Not Fully Verified. Live facial security scan required to unlock access.'
+            'ACCESS DENIED: Facial verification required to unlock access.'
         );
         setStep('failed');
         return;
@@ -392,7 +413,7 @@ export default function StudentPortal({
       );
 
       if (!section) {
-        setErrorMessage('The selected class section could not be found.');
+        setErrorMessage('Selected section record not found.');
         setStep('failed');
         return;
       }
@@ -425,12 +446,43 @@ export default function StudentPortal({
       setStep('success');
     } catch (error) {
       console.error('Attendance verification error:', error);
-      setErrorMessage(
-        'Server security connection error. Access blocked for unverified accounts.'
-      );
+      setErrorMessage('Server connection error during verification.');
       setStep('failed');
     } finally {
       setIsVerifying(false);
+    }
+  };
+
+  const handleUpdateStudentSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage('');
+    setSuccessMessage('');
+
+    if (!selectedStudentId) {
+      setErrorMessage('Please select a student account.');
+      return;
+    }
+
+    try {
+      const res = await apiFetch('/api/student/update-settings', {
+        method: 'POST',
+        body: JSON.stringify({
+          studentId: selectedStudentId,
+          photoUrl: newProfilePhoto,
+          currentPassword,
+          newPassword,
+        }),
+      });
+
+      if (res.ok && res.data.success) {
+        setSuccessMessage('Student profile and password updated successfully!');
+        setCurrentPassword('');
+        setNewPassword('');
+      } else {
+        setErrorMessage(res.data.error || 'Failed to update student settings.');
+      }
+    } catch (err) {
+      setErrorMessage('Server error while updating profile.');
     }
   };
 
@@ -440,15 +492,20 @@ export default function StudentPortal({
     setSelectedStudentId('');
     setPasswordInput('');
     setSelectedTeacherId('');
+    setSelectedSubjectId('');
     setScannedSectionId('');
     setErrorMessage('');
+    setSuccessMessage('');
     setVerifiedStudent(null);
     setAttendanceType('In');
     setStep('qr_scan');
   };
 
   const activeTeacher = teachersList.find((t) => String(t.id) === String(selectedTeacherId));
-  const filteredSections = activeTeacher ? activeTeacher.sections : sections;
+  const teacherSections = activeTeacher ? activeTeacher.sections : [];
+
+  const availableSections = Array.from(new Set(teacherSections.map((s: any) => s.name)));
+  const availableSubjectsForSection = teacherSections.filter((s: any) => scannedSectionId && s.name === scannedSectionId);
 
   const currentActiveSection = sections.find((s) => s.id === scannedSectionId);
   const sectionStudents = currentActiveSection?.students || [];
@@ -458,7 +515,16 @@ export default function StudentPortal({
 
   return (
     <div className="max-w-xl mx-auto bg-white dark:bg-gray-900 rounded-3xl border p-8 shadow-xl space-y-6">
-      <div className="text-center space-y-2">
+      <div className="text-center space-y-2 relative">
+        <button
+          type="button"
+          onClick={() => setShowSettingsModal(true)}
+          className="absolute right-0 top-0 p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 font-bold text-xs flex items-center gap-1 transition cursor-pointer"
+        >
+          <User size={14} />
+          <span>Settings &amp; Logs</span>
+        </button>
+
         <h2 className="text-2xl font-black">
           Student Attendance Portal
         </h2>
@@ -477,7 +543,7 @@ export default function StudentPortal({
               <button
                 type="button"
                 onClick={() => setAttendanceType('In')}
-                className={`flex-1 py-2.5 rounded-xl font-bold ${
+                className={`flex-1 py-2.5 rounded-xl font-bold cursor-pointer ${
                   attendanceType === 'In'
                     ? 'bg-indigo-600 text-white'
                     : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300'
@@ -488,7 +554,7 @@ export default function StudentPortal({
               <button
                 type="button"
                 onClick={() => setAttendanceType('Out')}
-                className={`flex-1 py-2.5 rounded-xl font-bold ${
+                className={`flex-1 py-2.5 rounded-xl font-bold cursor-pointer ${
                   attendanceType === 'Out'
                     ? 'bg-indigo-600 text-white'
                     : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300'
@@ -505,7 +571,7 @@ export default function StudentPortal({
               <span>QR Code Verification</span>
             </div>
             <p className="text-[11px] text-gray-500 dark:text-gray-400">
-              Scan using your camera or upload a QR code image to proceed to facial security verification.
+              Scan using your camera or upload a QR code image to proceed to facial verification.
             </p>
 
             {isScanningQR ? (
@@ -523,7 +589,7 @@ export default function StudentPortal({
                   <button
                     type="button"
                     onClick={stopQrCamera}
-                    className="px-4 py-2 bg-rose-600 text-white font-bold rounded-xl flex items-center justify-center gap-2 mx-auto"
+                    className="px-4 py-2 bg-rose-600 text-white font-bold rounded-xl flex items-center justify-center gap-2 mx-auto cursor-pointer"
                   >
                     <X size={16} />
                     <span>Close QR Camera</span>
@@ -535,10 +601,10 @@ export default function StudentPortal({
                 <button
                   type="button"
                   onClick={startQrCamera}
-                  className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition shadow"
+                  className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition shadow cursor-pointer"
                 >
                   <Camera size={16} />
-                  <span>Scan QR with Camera</span>
+                  <span>Scan QR Camera</span>
                 </button>
 
                 <label className="flex-1 py-3 px-4 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200 font-bold rounded-xl flex items-center justify-center gap-2 transition shadow cursor-pointer text-center">
@@ -558,7 +624,7 @@ export default function StudentPortal({
           <div className="relative flex py-2 items-center">
             <div className="flex-grow border-t border-gray-200 dark:border-gray-800"></div>
             <span className="flex-shrink mx-4 text-gray-400 font-bold uppercase text-[10px]">
-              Or Manual Selection (If QR unavailable)
+              Or Manual Selection
             </span>
             <div className="flex-grow border-t border-gray-200 dark:border-gray-800"></div>
           </div>
@@ -575,18 +641,19 @@ export default function StudentPortal({
                   onChange={(e) => {
                     setSelectedTeacherId(e.target.value);
                     setScannedSectionId('');
+                    setSelectedSubjectId('');
                   }}
                   className="w-full border dark:border-gray-700 rounded-xl p-3 font-bold bg-white dark:bg-gray-900"
+                  required
                 >
                   <option value="">-- Select Teacher --</option>
                   {teachersList.map((teacher) => (
                     <option key={teacher.id} value={teacher.id}>
-                      {teacher.name} {teacher.subject ? `(${teacher.subject})` : ''}
+                      {teacher.name}
                     </option>
                   ))}
                 </select>
 
-                {/* TEACHER PROFILE PICTURE PREVIEW CARD */}
                 {activeTeacher && (
                   <div className="mt-3 p-3 bg-indigo-50/60 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900 rounded-2xl flex items-center gap-3">
                     {activeTeacher.photo ? (
@@ -615,20 +682,56 @@ export default function StudentPortal({
 
               <div>
                 <label className="font-bold block mb-1">
-                  Choose Subject / Section
+                  Choose Section
                 </label>
                 <select
                   value={scannedSectionId}
-                  onChange={(e) => setScannedSectionId(e.target.value)}
-                  className="w-full border dark:border-gray-700 rounded-xl p-3 font-bold bg-white dark:bg-gray-900"
+                  onChange={(e) => {
+                    setScannedSectionId(e.target.value);
+                    setSelectedSubjectId('');
+                  }}
+                  disabled={!selectedTeacherId}
+                  className="w-full border dark:border-gray-700 rounded-xl p-3 font-bold bg-white dark:bg-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
                   required
                 >
-                  <option value="">-- Select Subject / Section --</option>
-                  {filteredSections.map((section: any) => (
-                    <option key={section.id} value={section.id}>
-                      {section.name} ({formatSectionTime(section.startTime)})
+                  <option value="">
+                    {!selectedTeacherId ? '-- Please Select a Teacher First --' : '-- Select Section --'}
+                  </option>
+                  {availableSections.map((secName: any) => (
+                    <option key={secName} value={secName}>
+                      Section: {secName}
                     </option>
                   ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold block mb-1">
+                  Choose Subject / Schedule
+                </label>
+                <select
+                  value={selectedSubjectId}
+                  onChange={(e) => setSelectedSubjectId(e.target.value)}
+                  disabled={!scannedSectionId}
+                  className="w-full border dark:border-gray-700 rounded-xl p-3 font-bold bg-white dark:bg-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
+                  required
+                >
+                  <option value="">
+                    {!scannedSectionId ? '-- Please Select a Section First --' : '-- Select Subject --'}
+                  </option>
+                  {availableSubjectsForSection.map((section: any) => {
+                    const displayTime = attendanceType === 'Out' 
+                      ? (section.endTime || '17:00') 
+                      : (section.startTime || '08:00');
+
+                    const displaySubjectName = section.subject || activeTeacher?.subject || section.name;
+
+                    return (
+                      <option key={section.id} value={section.id}>
+                        {displaySubjectName} ({formatSectionTime(displayTime)})
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
             </div>
@@ -641,7 +744,7 @@ export default function StudentPortal({
 
             <button
               type="submit"
-              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition"
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition cursor-pointer"
             >
               <span>Proceed to Facial Verification</span>
               <ArrowRight size={16} />
@@ -653,7 +756,7 @@ export default function StudentPortal({
       {step === 'facial_verify' && (
         <div className="space-y-4 text-xs text-center">
           <p className="font-bold text-indigo-600 dark:text-indigo-400">
-            Step 2: Select Your Name &amp; Live Facial Verification ({attendanceType === 'In' ? 'Time In' : 'Time Out'})
+            Step 2: Select Your Name &amp; Facial Verification ({attendanceType === 'In' ? 'Time In' : 'Time Out'})
           </p>
 
           <div className="relative inline-block overflow-hidden rounded-2xl border-4 border-indigo-600 bg-black shadow-lg">
@@ -669,7 +772,7 @@ export default function StudentPortal({
 
           {!cameraActive && (
             <p className="text-amber-600">
-              The camera is starting or camera access must be allowed.
+              Camera is initializing or check camera permissions.
             </p>
           )}
 
@@ -677,7 +780,7 @@ export default function StudentPortal({
             <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-500 rounded-xl flex items-center gap-2 text-left">
               <ShieldAlert size={20} className="flex-shrink-0" />
               <span>
-                <strong>Access Restricted:</strong> This account is <em>Not Fully Verified</em>. You must complete live facial security verification below to unlock access and submit attendance.
+                <strong>Access Restricted:</strong> This account is <em>Not Fully Verified</em>. You must complete live facial verification below to unlock access.
               </span>
             </div>
           )}
@@ -706,7 +809,7 @@ export default function StudentPortal({
                 <input
                   type="password"
                   autoComplete="current-password"
-                  placeholder="Enter your password"
+                  placeholder="Enter password"
                   value={passwordInput}
                   onChange={(e) => setPasswordInput(e.target.value)}
                   className="w-full border dark:border-gray-700 rounded-xl p-2.5 bg-white dark:bg-gray-900 font-bold"
@@ -726,7 +829,7 @@ export default function StudentPortal({
             type="button"
             onClick={handleCaptureAndVerifyFace}
             disabled={!cameraActive || isVerifying}
-            className="w-full bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition shadow flex items-center justify-center gap-2"
+            className="w-full bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition shadow flex items-center justify-center gap-2 cursor-pointer"
           >
             <Lock size={16} />
             <span>{isVerifying ? 'Verifying & Unlocking...' : 'Verify Face & Unlock Access'}</span>
@@ -735,7 +838,7 @@ export default function StudentPortal({
           <button
             type="button"
             onClick={resetPortal}
-            className="text-gray-500 dark:text-gray-400 underline hover:text-gray-700 dark:hover:text-gray-200"
+            className="text-gray-500 dark:text-gray-400 underline hover:text-gray-700 dark:hover:text-gray-200 cursor-pointer"
           >
             Cancel
           </button>
@@ -747,7 +850,7 @@ export default function StudentPortal({
           <CheckCircle2 size={64} className="text-green-500 mx-auto" />
 
           <h3 className="text-xl font-bold">
-            Account Fully Verified &amp; Access Granted!
+            Attendance Submitted Successfully!
           </h3>
 
           {verifiedStudent && (
@@ -757,13 +860,13 @@ export default function StudentPortal({
           )}
 
           <p className="text-xs text-gray-500">
-            Facial verification successful. Your account is now fully unlocked and attendance recorded.
+            Facial verification complete. Attendance record saved into system logs.
           </p>
 
           <button
             type="button"
             onClick={resetPortal}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl text-xs font-bold transition shadow"
+            className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl text-xs font-bold transition shadow cursor-pointer"
           >
             Done / Submit Another
           </button>
@@ -779,16 +882,132 @@ export default function StudentPortal({
           </h3>
 
           <p role="alert" className="text-xs text-rose-500">
-            {errorMessage || 'You cannot access the portal or submit attendance until your account is fully verified through facial security.'}
+            {errorMessage || 'You cannot submit attendance until your account is fully verified through facial security.'}
           </p>
 
           <button
             type="button"
             onClick={resetPortal}
-            className="bg-gray-800 hover:bg-gray-900 text-white px-6 py-2.5 rounded-xl text-xs font-bold transition shadow"
+            className="bg-gray-800 hover:bg-gray-900 text-white px-6 py-2.5 rounded-xl text-xs font-bold transition shadow cursor-pointer"
           >
             Back to Verification
           </button>
+        </div>
+      )}
+
+      {/* STUDENT SETTINGS MODAL */}
+      {showSettingsModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200 p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center border-b pb-3 dark:border-gray-800">
+              <h3 className="font-extrabold text-sm flex items-center gap-2">
+                <User size={16} className="text-indigo-600" /> Student Profile &amp; Settings
+              </h3>
+              <button 
+                onClick={() => setShowSettingsModal(false)}
+                className="text-gray-400 hover:text-gray-200 p-1 cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateStudentSettings} className="space-y-4 text-xs">
+              <div>
+                <label className="font-bold block mb-1">Select Student Account</label>
+                <select
+                  value={selectedStudentId}
+                  onChange={(e) => setSelectedStudentId(e.target.value)}
+                  className="w-full border dark:border-gray-700 rounded-xl p-2.5 bg-white dark:bg-gray-900 font-bold"
+                  required
+                >
+                  <option value="">-- Choose Account --</option>
+                  {sections.flatMap((sec) => sec.students || []).map((st: any) => (
+                    <option key={st.id} value={st.id}>
+                      {st.name} (@{st.username})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold block mb-1">Update Profile Photo URL</label>
+                <input
+                  type="text"
+                  placeholder="https://example.com/photo.jpg"
+                  value={newProfilePhoto}
+                  onChange={(e) => setNewProfilePhoto(e.target.value)}
+                  className="w-full border dark:border-gray-700 rounded-xl p-2.5 bg-white dark:bg-gray-900"
+                />
+              </div>
+
+              <div className="border-t pt-3 dark:border-gray-800 space-y-3">
+                <h4 className="font-bold text-gray-700 dark:text-gray-300">Change Password (Optional)</h4>
+                
+                <div>
+                  <label className="font-bold block mb-1">Current Password</label>
+                  <div className="relative">
+                    <input
+                      type={showCurrentPassword ? 'text' : 'password'}
+                      placeholder="Current password"
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      className="w-full border dark:border-gray-700 rounded-xl p-2.5 pr-10 bg-white dark:bg-gray-900"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                      className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-200 cursor-pointer"
+                    >
+                      {showCurrentPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="font-bold block mb-1">New Password</label>
+                  <div className="relative">
+                    <input
+                      type={showNewPassword ? 'text' : 'password'}
+                      placeholder="New password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      className="w-full border dark:border-gray-700 rounded-xl p-2.5 pr-10 bg-white dark:bg-gray-900"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                      className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-200 cursor-pointer"
+                    >
+                      {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {errorMessage && (
+                <p role="alert" className="text-rose-500 font-bold">{errorMessage}</p>
+              )}
+              {successMessage && (
+                <p className="text-green-500 font-bold">{successMessage}</p>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowSettingsModal(false)}
+                  className="px-4 py-2 bg-gray-200 dark:bg-gray-800 rounded-xl font-bold cursor-pointer"
+                >
+                  Close
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow cursor-pointer"
+                >
+                  Save Settings
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

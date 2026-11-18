@@ -231,7 +231,7 @@ export default function AboutUs({ onBackToHome }: AboutUsProps) {
             <span>Our 11-Member Research Team</span>
           </h2>
           <span className="text-[11px] text-indigo-600 dark:text-indigo-400 font-bold">
-            (I-klik ang ngalan para Makita ang Hulagway)
+            (Click the name to view the image)
           </span>
         </div>
 

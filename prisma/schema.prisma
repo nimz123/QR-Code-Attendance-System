@@ -8,88 +8,92 @@ generator client {
 }
 
 model Teacher {
-  id           Int      @id @default(autoincrement())
+  id           String       @id @default(uuid())
+  username     String       @unique
   name         String
-  username     String   @unique
   passwordHash String
-  email        String?  // Gidugang para sa tinuod nga email address
-  photo        String?  // Gidugang para sa profile picture
-  room         String?
+  email        String?
   subject      String?
+  room         String?
+  photo        String?
   sections     Section[]
-  records      AttendanceRecord[]
-  messages     StudentMessage[]
-  securityLogs SecurityLog[]
-  createdAt    DateTime @default(now())
+  logs         TeacherLog[]
+  createdAt    DateTime     @default(now())
+}
+
+model TeacherLog {
+  id        String   @id @default(uuid())
+  teacherId String
+  teacher   Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  action    String
+  date      String
+  time      String
+  createdAt DateTime @default(now())
 }
 
 model Section {
-  id               String             @id @default(uuid()) 
-  name             String
+  id                     String             @id @default(uuid())
+  name                   String             // Section Name (e.g. A-1, BIT-CT 2-A)
+  subject                String?            // Subject Name
+  room                   String?
+  startTime              String?
+  endTime                String?
+  absentCutoffTime       String?
+  requireTeacherApproval Boolean            @default(false) // Toggle for Teacher: ON = manual approval, OFF = automatic attendance
+  teacherId              String
+  teacher                Teacher            @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  students               Student[]
+  schedules              SectionSchedule[]
+  qrSessions             QRSession[]
+  records                AttendanceRecord[]
+  createdAt              DateTime           @default(now())
+}
+
+model SectionSchedule {
+  id               String   @id @default(uuid())
+  sectionId        String
+  section          Section  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  date             String
+  room             String
   startTime        String
-  endTime          String
   absentCutoffTime String
-  teacherId        Int
-  teacher          Teacher            @relation(fields: [teacherId], references: [id], onDelete: Cascade)
-  students         Student[]
-  records          AttendanceRecord[]
-  qrSessions       QRSession[]
-  createdAt        DateTime           @default(now())
+  endTime          String
+  createdAt        DateTime @default(now())
 }
 
 model Student {
-  id           String             @id
-  name         String
-  username     String             @unique
-  passwordHash String
-  photoUrl     String?
-  isVerified   Boolean            @default(false)
-  sectionId    String
-  section      Section            @relation(fields: [sectionId], references: [id], onDelete: Cascade)
-  records      AttendanceRecord[]
-  createdAt    DateTime           @default(now())
-}
-
-model AttendanceRecord {
-  id        String   @id
-  studentId String
-  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  sectionId String
-  section   Section  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
-  teacherId Int
-  teacher   Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
-  type      String   // "In" or "Out"
-  status    String   // "Present", "Late", "Absent"
-  date      String
-  time      String
-  photoUrl  String?
-  timestamp DateTime @default(now())
+  id             String             @id
+  sectionId      String
+  section        Section            @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  name           String
+  username       String             @unique
+  passwordHash   String
+  photoUrl       String?            // Editable student profile picture
+  biometricPhoto String?            // One-time biometric facial security reference photo (locked)
+  isVerified     Boolean            @default(false)
+  records        AttendanceRecord[]
+  createdAt      DateTime           @default(now())
 }
 
 model QRSession {
   id        String   @id @default(uuid())
-  tokenHash String   @unique
   sectionId String
   section   Section  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
   type      String   // "In" or "Out"
-  expiresAt DateTime
+  token     String   @unique
   createdAt DateTime @default(now())
 }
 
-model StudentMessage {
+model AttendanceRecord {
   id        String   @id @default(uuid())
-  teacherId Int
-  teacher   Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
   studentId String
-  content   String
-  timestamp DateTime @default(now())
-}
-
-model SecurityLog {
-  id          String   @id @default(uuid())
-  teacherId   Int
-  teacher     Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
-  teacherName String
-  action      String
-  timestamp   DateTime @default(now())
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  sectionId String
+  section   Section  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  type      String   // "In" or "Out"
+  status    String   // "Present", "Late", "Pending Approval", "Absent"
+  date      String
+  time      String
+  photoUrl  String?
+  createdAt DateTime @default(now())
 }
