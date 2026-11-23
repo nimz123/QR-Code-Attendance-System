@@ -1,26 +1,29 @@
+// Database connection configuration for PostgreSQL (uses DATABASE_URL from environment variables)
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
+// Prisma Client generator
 generator client {
   provider = "prisma-client-js"
 }
 
+// Teacher accounts managed by the Admin
 model Teacher {
   id           String       @id @default(uuid())
   username     String       @unique
   name         String
   passwordHash String
   email        String?
-  subject      String?
-  room         String?
   photo        String?
-  sections     Section[]
-  logs         TeacherLog[]
+  subjects     Subject[]    // Subjects assigned by the Admin to this teacher
+  sections     Section[]    // Sections created/handled by this teacher
+  logs         TeacherLog[] // Activity logs for the teacher
   createdAt    DateTime     @default(now())
 }
 
+// Activity audit logs for teacher actions
 model TeacherLog {
   id        String   @id @default(uuid())
   teacherId String
@@ -31,15 +34,28 @@ model TeacherLog {
   createdAt DateTime @default(now())
 }
 
+// Academic subjects created by the Admin and assigned to a Teacher
+model Subject {
+  id        String    @id @default(uuid())
+  name      String    @unique // e.g., Science, Math, Electrical
+  teacherId String?   // Assigned teacher ID (optional)
+  teacher   Teacher?  @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  students  Student[] // Students enrolled by the Admin in this subject
+  sections  Section[] // Class sections under this subject
+  createdAt DateTime  @default(now())
+}
+
+// Class sections created by a Teacher under an assigned Subject
 model Section {
   id                     String             @id @default(uuid())
-  name                   String             // Section Name (e.g. A-1, BIT-CT 2-A)
-  subject                String?            // Subject Name
+  name                   String             // e.g., Section 3-A
+  subjectId              String?
+  subject                Subject?           @relation(fields: [subjectId], references: [id], onDelete: Cascade)
   room                   String?
   startTime              String?
   endTime                String?
   absentCutoffTime       String?
-  requireTeacherApproval Boolean            @default(false) // Toggle for Teacher: ON = manual approval, OFF = automatic attendance
+  requireTeacherApproval Boolean            @default(false)
   teacherId              String
   teacher                Teacher            @relation(fields: [teacherId], references: [id], onDelete: Cascade)
   students               Student[]
@@ -49,6 +65,7 @@ model Section {
   createdAt              DateTime           @default(now())
 }
 
+// Specific date and time schedules for a Section
 model SectionSchedule {
   id               String   @id @default(uuid())
   sectionId        String
@@ -61,37 +78,42 @@ model SectionSchedule {
   createdAt        DateTime @default(now())
 }
 
+// Student accounts created by the Admin with biometric verification support
 model Student {
-  id             String             @id
-  sectionId      String
-  section        Section            @relation(fields: [sectionId], references: [id], onDelete: Cascade)
-  name           String
+  id             String             @id // Student ID Number (e.g., 2026-00123)
+  name           String             // Full Name (also used as default Username)
   username       String             @unique
-  passwordHash   String
-  photoUrl       String?            // Editable student profile picture
-  biometricPhoto String?            // One-time biometric facial security reference photo (locked)
+  passwordHash   String             // Default password is the Student ID Number
+  subjectId      String?            // Subject where the Admin enrolled the student
+  subject        Subject?           @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  sectionId      String?            // Optional initially; assigned later by the Teacher
+  section        Section?           @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  photoUrl       String?
+  biometricPhoto String?
   isVerified     Boolean            @default(false)
   records        AttendanceRecord[]
   createdAt      DateTime           @default(now())
 }
 
+// Active QR code sessions generated for attendance scanning
 model QRSession {
   id        String   @id @default(uuid())
   sectionId String
   section   Section  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
-  type      String   // "In" or "Out"
+  type      String   // e.g., time-in or time-out
   token     String   @unique
   createdAt DateTime @default(now())
 }
 
+// Individual student attendance scan records
 model AttendanceRecord {
   id        String   @id @default(uuid())
   studentId String
   student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
   sectionId String
   section   Section  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
-  type      String   // "In" or "Out"
-  status    String   // "Present", "Late", "Pending Approval", "Absent"
+  type      String
+  status    String   // e.g., Present, Late, Absent
   date      String
   time      String
   photoUrl  String?

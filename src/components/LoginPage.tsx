@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { AuthUser } from '../types';
+import { submitTeacherResetRequestLocal } from './portalFeatures';
 import {
   ArrowLeft,
   Eye,
@@ -12,6 +13,8 @@ import {
   CheckCircle2,
   AlertTriangle,
   KeyRound,
+  X,
+  Send,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 
@@ -19,6 +22,10 @@ interface LoginPageProps {
   onLoginSuccess: (user: AuthUser) => void;
   onBackToCheckin: () => void;
 }
+
+const TEACHER_RESET_COOLDOWN_MS = 2 * 60 * 1000; // 2 minutes per teacher username
+const TEACHER_RESET_STORAGE_KEY = 'teacher_password_reset_requests';
+const TEACHER_RESET_COOLDOWN_KEY = 'teacher_password_reset_cooldowns';
 
 export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPageProps) {
   const [role, setRole] = useState<'teacher' | 'student' | 'admin'>('teacher');
@@ -32,12 +39,19 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
   const [needsVerification, setNeedsVerification] = useState(false);
   const [pendingStudentData, setPendingStudentData] = useState<any>(null);
 
+  // Student Forgot Password flow states
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [forgotStep, setForgotStep] = useState<'username' | 'face' | 'reset'>('username');
   const [forgotUsername, setForgotUsername] = useState('');
   const [newResetPassword, setNewResetPassword] = useState('');
   const [confirmResetPassword, setConfirmResetPassword] = useState('');
-  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [showResetPassword] = useState(false);
+
+  // Teacher Admin Approval Request states (Option B)
+  const [isTeacherResetRequest, setIsTeacherResetRequest] = useState(false);
+  const [teacherResetUsername, setTeacherResetUsername] = useState('');
+  const [teacherResetEmail, setTeacherResetEmail] = useState('');
+  const [teacherResetNote, setTeacherResetNote] = useState('');
 
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
   const [cameraActive, setCameraActive] = useState(false);
@@ -53,6 +67,7 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        await videoRef.current.play().catch(() => {});
       }
       setCameraActive(true);
     } catch (err: any) {
@@ -67,7 +82,25 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
     setCameraActive(false);
+  };
+
+  const handleCloseFaceVerification = () => {
+    stopCamera();
+    setCapturedPhoto(null);
+    setErrorMessage('');
+    setNeedsVerification(false);
+    setPendingStudentData(null);
+  };
+
+  const handleCloseForgotFaceScan = () => {
+    stopCamera();
+    setCapturedPhoto(null);
+    setErrorMessage('');
+    setForgotStep('username');
   };
 
   useEffect(() => {
@@ -79,7 +112,13 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
     };
   }, [needsVerification, isForgotPassword, forgotStep]);
 
-  // Validate image brightness to ensure captured face is clear and well-lit
+  useEffect(() => {
+    if (streamRef.current && videoRef.current && !capturedPhoto) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch(() => {});
+    }
+  }, [capturedPhoto, needsVerification, isForgotPassword, forgotStep]);
+
   const validateImageBrightness = (dataUrl: string): Promise<boolean> => {
     return new Promise((resolve) => {
       const img = new Image();
@@ -107,11 +146,7 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
         }
 
         const brightness = colorSum / (data.length / 4 / 10);
-        if (brightness < 45) {
-          resolve(false); // Too dark / unclear
-        } else {
-          resolve(true); // Bright enough
-        }
+        resolve(brightness >= 45);
       };
       img.onerror = () => resolve(false);
     });
@@ -160,8 +195,8 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
       const { ok, data } = await apiFetch('/api/student/verify-attendance', {
         method: 'POST',
         body: JSON.stringify({
-          studentId: pendingStudentData.user.id,
-          sectionId: pendingStudentData.user.sectionId,
+          studentId: pendingStudentData?.user?.id,
+          sectionId: pendingStudentData?.user?.sectionId,
           capturedPhoto,
           type: 'In',
         }),
@@ -243,6 +278,109 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
     }
   };
 
+  const getRemainingTeacherCooldownSeconds = (targetUsername: string): number => {
+    const cleanKey = targetUsername.trim().toLowerCase();
+    if (!cleanKey) return 0;
+    try {
+      const map = JSON.parse(localStorage.getItem(TEACHER_RESET_COOLDOWN_KEY) || '{}');
+      const lastSentAt = Number(map?.[cleanKey] || 0);
+      if (!lastSentAt) return 0;
+      const elapsed = Date.now() - lastSentAt;
+      if (elapsed >= TEACHER_RESET_COOLDOWN_MS) return 0;
+      return Math.ceil((TEACHER_RESET_COOLDOWN_MS - elapsed) / 1000);
+    } catch {
+      return 0;
+    }
+  };
+
+  const recordTeacherCooldown = (targetUsername: string) => {
+    const cleanKey = targetUsername.trim().toLowerCase();
+    if (!cleanKey) return;
+    try {
+      const map = JSON.parse(localStorage.getItem(TEACHER_RESET_COOLDOWN_KEY) || '{}');
+      map[cleanKey] = Date.now();
+      localStorage.setItem(TEACHER_RESET_COOLDOWN_KEY, JSON.stringify(map));
+    } catch {}
+  };
+
+  // Submit Teacher Password Reset Request for Admin Approval (Option B + Anti-Spam Cooldown)
+  const handleSubmitTeacherResetRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanUsername = teacherResetUsername.trim();
+    if (!cleanUsername) {
+      setErrorMessage('Please enter your teacher username.');
+      return;
+    }
+
+    const remainingSec = getRemainingTeacherCooldownSeconds(cleanUsername);
+    if (remainingSec > 0) {
+      setErrorMessage(
+        `A reset request was already sent for "${cleanUsername}". Please wait ${remainingSec}s before sending another request.`
+      );
+      return;
+    }
+
+    setIsLoading(true);
+    setErrorMessage('');
+    setSuccessMessage('');
+
+    const requestPayload = {
+      id: `tr_${Date.now()}`,
+      role: 'teacher',
+      username: cleanUsername,
+      email: teacherResetEmail.trim(),
+      note: teacherResetNote.trim(),
+      status: 'pending',
+      requestedAt: new Date().toISOString(),
+    };
+
+    const saveLocalRequestIfNotDuplicate = () => {
+      try {
+        const existing = JSON.parse(localStorage.getItem(TEACHER_RESET_STORAGE_KEY) || '[]');
+        const list = Array.isArray(existing) ? existing : [];
+        const hasPending = list.some(
+          (item: any) =>
+            String(item?.username || '').trim().toLowerCase() === cleanUsername.toLowerCase() &&
+            String(item?.status || 'pending').toLowerCase() === 'pending'
+        );
+        if (!hasPending) {
+          list.unshift(requestPayload);
+          localStorage.setItem(TEACHER_RESET_STORAGE_KEY, JSON.stringify(list));
+        }
+      } catch {}
+    };
+
+    try {
+      const { ok, data } = await apiFetch('/api/auth/teacher-password-reset-request', {
+        method: 'POST',
+        body: JSON.stringify(requestPayload),
+      });
+
+      recordTeacherCooldown(cleanUsername);
+      saveLocalRequestIfNotDuplicate();
+
+      setIsTeacherResetRequest(false);
+      setUsername(cleanUsername);
+      setPassword('');
+      setTeacherResetNote('');
+      setSuccessMessage(
+        ok && data?.success !== false
+          ? 'Password reset request sent for Admin approval.'
+          : 'Password reset request recorded for Admin approval.'
+      );
+    } catch {
+      recordTeacherCooldown(cleanUsername);
+      saveLocalRequestIfNotDuplicate();
+
+      setIsTeacherResetRequest(false);
+      setUsername(cleanUsername);
+      setPassword('');
+      setSuccessMessage('Password reset request saved for Admin approval.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username.trim() || !password.trim()) {
@@ -288,6 +426,94 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
     }
   };
 
+  // Teacher Forgot Password -> Admin Approval Request view
+  if (isTeacherResetRequest) {
+    return (
+      <div className="max-w-md mx-auto bg-white dark:bg-gray-900 rounded-3xl border border-gray-100 dark:border-gray-800 p-8 shadow-xl space-y-6">
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => {
+              setIsTeacherResetRequest(false);
+              setErrorMessage('');
+            }}
+            className="flex items-center gap-1.5 text-xs font-bold text-gray-500 hover:text-indigo-600 transition cursor-pointer"
+          >
+            <ArrowLeft size={16} /> <span>Back to Sign In</span>
+          </button>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-300 text-[10px] font-mono font-bold uppercase">
+            <KeyRound size={12} /> Admin Approval
+          </span>
+        </div>
+
+        <div className="text-center space-y-1">
+          <h2 className="text-xl font-black text-gray-900 dark:text-white">Teacher Password Reset</h2>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            Submit a request for Admin approval to reset your teacher password.
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmitTeacherResetRequest} className="space-y-4 text-xs">
+          <div className="space-y-1">
+            <label className="font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">
+              TEACHER USERNAME
+            </label>
+            <input
+              type="text"
+              required
+              value={teacherResetUsername}
+              onChange={(e) => setTeacherResetUsername(e.target.value)}
+              placeholder="Enter teacher username"
+              className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-4 py-3 font-bold text-sm text-gray-900 dark:text-white focus:outline-none focus:border-indigo-600"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">
+              EMAIL (OPTIONAL)
+            </label>
+            <input
+              type="email"
+              value={teacherResetEmail}
+              onChange={(e) => setTeacherResetEmail(e.target.value)}
+              placeholder="Enter registered email"
+              className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-4 py-3 font-bold text-sm text-gray-900 dark:text-white focus:outline-none focus:border-indigo-600"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">
+              NOTE FOR ADMIN (OPTIONAL)
+            </label>
+            <input
+              type="text"
+              value={teacherResetNote}
+              onChange={(e) => setTeacherResetNote(e.target.value)}
+              placeholder="e.g. Forgot password, need reset"
+              className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-4 py-3 font-bold text-sm text-gray-900 dark:text-white focus:outline-none focus:border-indigo-600"
+            />
+          </div>
+
+          {errorMessage && (
+            <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-amber-800 dark:text-amber-200 rounded-2xl font-bold flex items-center gap-2 text-xs">
+              <AlertTriangle size={16} className="text-amber-600 shrink-0" />
+              <span>{errorMessage}</span>
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 rounded-2xl shadow-lg transition cursor-pointer text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            <Send size={16} />
+            <span>{isLoading ? 'Sending Request...' : 'Request Admin Approval'}</span>
+          </button>
+        </form>
+      </div>
+    );
+  }
+
   if (isForgotPassword) {
     return (
       <div className="max-w-md mx-auto bg-gray-950 text-white rounded-3xl border border-indigo-500/30 p-8 shadow-2xl space-y-6 relative overflow-hidden">
@@ -312,13 +538,17 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
 
         <div className="text-center space-y-1">
           <h2 className="text-2xl font-black tracking-tight">Recover Account</h2>
-          <p className="text-xs text-gray-400">Verify your identity using facial recognition to reset your password.</p>
+          <p className="text-xs text-gray-400">
+            Verify your identity using facial recognition to reset your password.
+          </p>
         </div>
 
         {forgotStep === 'username' && (
           <form onSubmit={handleStartForgotFaceScan} className="space-y-4 text-xs">
             <div className="space-y-1.5">
-              <label className="font-bold text-gray-400 uppercase tracking-wider">STUDENT USERNAME</label>
+              <label className="font-bold text-gray-400 uppercase tracking-wider">
+                STUDENT USERNAME
+              </label>
               <input
                 type="text"
                 required
@@ -345,12 +575,31 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
 
         {forgotStep === 'face' && (
           <div className="space-y-4">
-            <div className="relative rounded-2xl overflow-hidden bg-black aspect-video flex items-center justify-center border-2 border-emerald-500/50 shadow-[0_0_25px_rgba(16,185,129,0.2)]">
-              {capturedPhoto ? (
-                <img src={capturedPhoto} alt="Captured Face" className="w-full h-full object-cover" />
-              ) : (
-                <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover transform -scale-x-100" />
-              )}
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-emerald-300">Face Scan</span>
+              <button
+                type="button"
+                onClick={handleCloseForgotFaceScan}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs font-bold transition cursor-pointer"
+              >
+                <X size={14} /> <span>Close</span>
+              </button>
+            </div>
+
+            <div className="flex flex-col items-center justify-center py-1">
+              <div className="relative w-60 h-60 sm:w-72 sm:h-72 rounded-full overflow-hidden bg-black flex items-center justify-center border-4 border-emerald-400/80 shadow-[0_0_35px_rgba(16,185,129,0.3)]">
+                {capturedPhoto ? (
+                  <img src={capturedPhoto} alt="Captured Face" className="w-full h-full object-cover" />
+                ) : (
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full h-full object-cover transform -scale-x-100"
+                  />
+                )}
+              </div>
             </div>
 
             {errorMessage && (
@@ -371,7 +620,9 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
             ) : (
               <form onSubmit={handleResetPasswordWithFace} className="space-y-3 text-xs">
                 <div className="space-y-1">
-                  <label className="font-bold text-gray-400 uppercase tracking-wider">NEW PASSWORD</label>
+                  <label className="font-bold text-gray-400 uppercase tracking-wider">
+                    NEW PASSWORD
+                  </label>
                   <input
                     type={showResetPassword ? 'text' : 'password'}
                     required
@@ -383,7 +634,9 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="font-bold text-gray-400 uppercase tracking-wider">CONFIRM PASSWORD</label>
+                  <label className="font-bold text-gray-400 uppercase tracking-wider">
+                    CONFIRM PASSWORD
+                  </label>
                   <input
                     type={showResetPassword ? 'text' : 'password'}
                     required
@@ -421,24 +674,47 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
   if (needsVerification) {
     return (
       <div className="max-w-lg mx-auto bg-gray-950 text-white rounded-3xl border border-emerald-500/30 p-8 shadow-2xl space-y-6 text-center relative overflow-hidden">
-        <div className="space-y-2 relative z-10">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-400 text-xs font-mono font-bold tracking-widest uppercase">
+        <div className="flex items-center justify-between relative z-10">
+          <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-400 text-xs font-mono font-bold tracking-widest uppercase">
             <Shield size={14} /> Biometric Security Required
-          </div>
-          <h2 className="text-2xl font-black tracking-tight text-white">First-Time Facial Identity Lock</h2>
-          <p className="text-xs text-gray-400">Position your face clearly in a well-lit area. Dark or unclear scans will trigger an error.</p>
+          </span>
+          <button
+            type="button"
+            onClick={handleCloseFaceVerification}
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-800 text-gray-300 border border-gray-700 text-xs font-bold transition cursor-pointer"
+          >
+            <X size={15} /> <span>Close</span>
+          </button>
         </div>
 
-        <div className="relative rounded-2xl overflow-hidden bg-black aspect-video flex items-center justify-center border-2 border-emerald-500/50 shadow-[0_0_25px_rgba(16,185,129,0.2)]">
-          {capturedPhoto ? (
-            <img src={capturedPhoto} alt="Captured Face" className="w-full h-full object-cover" />
-          ) : (
-            <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover transform -scale-x-100" />
-          )}
+        <div className="space-y-2 relative z-10">
+          <h2 className="text-2xl font-black tracking-tight text-white">
+            First-Time Facial Identity Lock
+          </h2>
+          <p className="text-xs text-gray-400">
+            Position your face clearly inside the circle in a well-lit area. Dark or unclear scans
+            will trigger an error.
+          </p>
+        </div>
+
+        <div className="flex flex-col items-center justify-center py-1 relative z-10">
+          <div className="relative w-60 h-60 sm:w-72 sm:h-72 rounded-full overflow-hidden bg-black flex items-center justify-center border-4 border-emerald-400/80 shadow-[0_0_35px_rgba(16,185,129,0.3)]">
+            {capturedPhoto ? (
+              <img src={capturedPhoto} alt="Captured Face" className="w-full h-full object-cover" />
+            ) : (
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover transform -scale-x-100"
+              />
+            )}
+          </div>
         </div>
 
         {errorMessage && (
-          <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-2xl font-bold text-xs">
+          <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-2xl font-bold text-xs relative z-10">
             {errorMessage}
           </div>
         )}
@@ -485,7 +761,9 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
         >
           <ArrowLeft size={16} /> <span>Back to Check-In</span>
         </button>
-        <span className="text-xs font-mono bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-full font-bold">Secure Portal</span>
+        <span className="text-xs font-mono bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-full font-bold">
+          Secure Portal
+        </span>
       </div>
 
       <div className="text-center space-y-1">
@@ -497,34 +775,45 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
           type="button"
           onClick={() => setRole('teacher')}
           className={`flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl text-xs font-bold transition cursor-pointer ${
-            role === 'teacher' ? 'bg-white dark:bg-gray-700 text-indigo-600 shadow-sm' : 'text-gray-500'
+            role === 'teacher'
+              ? 'bg-white dark:bg-gray-700 text-indigo-600 shadow-sm'
+              : 'text-gray-500'
           }`}
         >
-          <UserCheck size={16} /><span>Teacher</span>
+          <UserCheck size={16} />
+          <span>Teacher</span>
         </button>
         <button
           type="button"
           onClick={() => setRole('student')}
           className={`flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl text-xs font-bold transition cursor-pointer ${
-            role === 'student' ? 'bg-white dark:bg-gray-700 text-indigo-600 shadow-sm' : 'text-gray-500'
+            role === 'student'
+              ? 'bg-white dark:bg-gray-700 text-indigo-600 shadow-sm'
+              : 'text-gray-500'
           }`}
         >
-          <GraduationCap size={16} /><span>Student</span>
+          <GraduationCap size={16} />
+          <span>Student</span>
         </button>
         <button
           type="button"
           onClick={() => setRole('admin')}
           className={`flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl text-xs font-bold transition cursor-pointer ${
-            role === 'admin' ? 'bg-white dark:bg-gray-700 text-indigo-600 shadow-sm' : 'text-gray-500'
+            role === 'admin'
+              ? 'bg-white dark:bg-gray-700 text-indigo-600 shadow-sm'
+              : 'text-gray-500'
           }`}
         >
-          <Shield size={16} /><span>Admin</span>
+          <Shield size={16} />
+          <span>Admin</span>
         </button>
       </div>
 
       <form onSubmit={handleLogin} className="space-y-4 text-xs">
         <div className="space-y-1">
-          <label className="font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">USERNAME</label>
+          <label className="font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">
+            USERNAME
+          </label>
           <input
             type="text"
             required
@@ -537,13 +826,29 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
 
         <div className="space-y-1">
           <div className="flex items-center justify-between">
-            <label className="font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">PASSWORD</label>
+            <label className="font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">
+              PASSWORD
+            </label>
             {role === 'student' && (
               <button
                 type="button"
                 onClick={() => {
                   setIsForgotPassword(true);
                   setForgotUsername(username);
+                  setErrorMessage('');
+                  setSuccessMessage('');
+                }}
+                className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+              >
+                Forgot Password?
+              </button>
+            )}
+            {role === 'teacher' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsTeacherResetRequest(true);
+                  setTeacherResetUsername(username);
                   setErrorMessage('');
                   setSuccessMessage('');
                 }}
