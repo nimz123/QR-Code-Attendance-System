@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { AuthUser } from '../types';
-import { submitTeacherResetRequestLocal } from './portalFeatures';
 import {
   ArrowLeft,
   Eye,
@@ -23,7 +22,7 @@ interface LoginPageProps {
   onBackToCheckin: () => void;
 }
 
-const TEACHER_RESET_COOLDOWN_MS = 2 * 60 * 1000; // 2 minutes per teacher username
+const TEACHER_RESET_COOLDOWN_MS = 2 * 60 * 1000;
 const TEACHER_RESET_STORAGE_KEY = 'teacher_password_reset_requests';
 const TEACHER_RESET_COOLDOWN_KEY = 'teacher_password_reset_cooldowns';
 
@@ -47,7 +46,7 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
   const [confirmResetPassword, setConfirmResetPassword] = useState('');
   const [showResetPassword] = useState(false);
 
-  // Teacher Admin Approval Request states (Option B)
+  // Teacher Admin Approval Request states
   const [isTeacherResetRequest, setIsTeacherResetRequest] = useState(false);
   const [teacherResetUsername, setTeacherResetUsername] = useState('');
   const [teacherResetEmail, setTeacherResetEmail] = useState('');
@@ -221,7 +220,7 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
   const handleStartForgotFaceScan = (e: React.FormEvent) => {
     e.preventDefault();
     if (!forgotUsername.trim()) {
-      setErrorMessage('Please enter your student username.');
+      setErrorMessage('Please enter your student ID or name.');
       return;
     }
     setErrorMessage('');
@@ -303,7 +302,6 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
     } catch {}
   };
 
-  // Submit Teacher Password Reset Request for Admin Approval (Option B + Anti-Spam Cooldown)
   const handleSubmitTeacherResetRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanUsername = teacherResetUsername.trim();
@@ -383,8 +381,11 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username.trim() || !password.trim()) {
-      setErrorMessage('Please enter both username and password.');
+    const cleanIdentifier = username.trim();
+    const cleanPassword = password.trim();
+
+    if (!cleanIdentifier || !cleanPassword) {
+      setErrorMessage('Please enter both ID/name/username and password.');
       return;
     }
 
@@ -395,12 +396,17 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
     try {
       const { ok, data } = await apiFetch('/api/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ username: username.trim(), password: password.trim(), role }),
+        body: JSON.stringify({
+          username: cleanIdentifier,
+          idNumber: cleanIdentifier,
+          password: cleanPassword,
+          role,
+        }),
       });
 
-      if (ok && data.success) {
+      if (ok && data?.success && data?.user) {
         if (data.user.role !== role) {
-          setErrorMessage('Access Denied');
+          setErrorMessage('Access Denied for selected role.');
           setIsLoading(false);
           return;
         }
@@ -416,7 +422,7 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
         if (data.token) localStorage.setItem('token', data.token);
         onLoginSuccess(data.user);
       } else {
-        setErrorMessage(data.error || 'Incorrect username or password.');
+        setErrorMessage(data?.error || 'Invalid ID, name, username, or password.');
       }
     } catch (err) {
       console.error(err);
@@ -426,7 +432,6 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
     }
   };
 
-  // Teacher Forgot Password -> Admin Approval Request view
   if (isTeacherResetRequest) {
     return (
       <div className="max-w-md mx-auto bg-white dark:bg-gray-900 rounded-3xl border border-gray-100 dark:border-gray-800 p-8 shadow-xl space-y-6">
@@ -547,14 +552,14 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
           <form onSubmit={handleStartForgotFaceScan} className="space-y-4 text-xs">
             <div className="space-y-1.5">
               <label className="font-bold text-gray-400 uppercase tracking-wider">
-                STUDENT USERNAME
+                STUDENT ID OR NAME
               </label>
               <input
                 type="text"
                 required
                 value={forgotUsername}
                 onChange={(e) => setForgotUsername(e.target.value)}
-                placeholder="Enter your registered username"
+                placeholder="Enter your student ID or registered name"
                 className="w-full bg-gray-900 border border-gray-700 rounded-2xl px-4 py-3 font-bold text-sm text-white focus:outline-none focus:border-indigo-500"
               />
             </div>
@@ -812,14 +817,18 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
       <form onSubmit={handleLogin} className="space-y-4 text-xs">
         <div className="space-y-1">
           <label className="font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">
-            USERNAME
+            {role === 'student' ? 'STUDENT ID OR NAME' : 'USERNAME'}
           </label>
           <input
             type="text"
             required
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            placeholder="Enter username"
+            placeholder={
+              role === 'student'
+                ? 'Enter student ID or registered name'
+                : 'Enter username'
+            }
             className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-4 py-3 font-bold text-sm text-gray-900 dark:text-white focus:outline-none focus:border-indigo-600"
           />
         </div>
@@ -864,7 +873,7 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
+              placeholder={role === 'student' ? 'Enter system-assigned Student ID' : '••••••••'}
               className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-4 py-3 pr-12 font-bold text-sm text-gray-900 dark:text-white focus:outline-none focus:border-indigo-600"
             />
             <button
@@ -875,6 +884,11 @@ export default function LoginPage({ onLoginSuccess, onBackToCheckin }: LoginPage
               {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
             </button>
           </div>
+          {role === 'student' && (
+            <p className="text-[11px] text-gray-500 dark:text-gray-400">
+              Default password is your system-assigned Student ID (e.g., 466220)[cite: 2].
+            </p>
+          )}
         </div>
 
         {errorMessage && (

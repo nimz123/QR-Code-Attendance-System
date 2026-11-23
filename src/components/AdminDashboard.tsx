@@ -59,6 +59,7 @@ interface StudentEntry {
   username?: string;
   email?: string;
   password?: string;
+  defaultPassword?: string;
   photoUrl?: string;
   avatar?: string;
   isVerified?: boolean;
@@ -85,11 +86,11 @@ type InspectedProfile =
 const DELETED_TEACHERS_KEY = "deleted_teacher_registry";
 const DELETED_STUDENTS_KEY = "deleted_student_registry";
 
-const DEFAULT_LORENZO_TEACHER: TeacherAccount = {
-  id: "lorenzo_birao",
-  name: "Lorenzo Birao",
-  username: "Lorenzo Birao",
-  email: "lorenzo.birao@edu.com"
+const DEFAULT_TEACHER: TeacherAccount = {
+  id: "",
+  name: "",
+  username: "",
+  email: "",
 };
 
 const SECTION_STORAGE_KEYS = [
@@ -153,11 +154,11 @@ function normalizeAttendanceStatus(rawStatus: any): AttendanceMark | null {
   return null;
 }
 
-// Generate a unique 6-digit numeric Student ID that is never duplicated across existing students
+// Generate a unique 6-digit numeric default password / ID that is never duplicated across existing students
 function generateUniqueSixDigitId(existingStudents: StudentEntry[]): string {
   const usedIds = new Set<string>(
     existingStudents
-      .map((s) => String(s.id || "").trim())
+      .flatMap((s) => [String(s.id || "").trim(), String(s.password || "").trim()])
       .filter(Boolean)
   );
 
@@ -174,7 +175,9 @@ function generateUniqueSixDigitId(existingStudents: StudentEntry[]): string {
           : [];
         for (const item of list) {
           const idVal = String(item?.studentId || item?.id || "").trim();
+          const passVal = String(item?.password || item?.defaultPassword || "").trim();
           if (idVal) usedIds.add(idVal);
+          if (passVal) usedIds.add(passVal);
         }
       } catch {}
     }
@@ -597,7 +600,6 @@ function VerifiedStudentAttendanceCalendar({ student }: { student: StudentEntry 
     }
     return "bg-[#0d1322] text-slate-500 border-slate-800/80";
   };
-
   return (
     <div className="bg-[#131b2e] border border-emerald-500/30 rounded-xl p-3.5 space-y-3">
       <div className="flex items-center justify-between gap-2">
@@ -751,19 +753,15 @@ function readAllSectionsFromStorage(): SectionEntry[] {
   return Array.from(sectionMap.values());
 }
 
-// Resolve exact student ID while preserving stored IDs/passwords
+// Resolve exact student ID while preserving stored 6-digit default password/ID
 function resolveStudentRecordId(item: any, existing?: StudentEntry): string {
+  const explicitId = String(item?.studentId || item?.id || "").trim();
+  const credentialPass = String(
+    item?.password || item?.defaultPassword || item?.studentPassword || ""
+  ).trim();
   const nameLower = String(item?.studentName || item?.name || item?.username || "")
     .trim()
     .toLowerCase();
-  const explicitId = String(item?.studentId || item?.id || "").trim();
-  const credentialPass = String(item?.password || item?.studentPassword || "").trim();
-
-  if (nameLower.includes("kirby")) {
-    if (explicitId && !explicitId.toLowerCase().startsWith("kirby")) return explicitId;
-    if (credentialPass) return credentialPass;
-    if (existing?.id && !existing.id.toLowerCase().startsWith("kirby")) return existing.id;
-  }
 
   return explicitId || existing?.id || credentialPass || nameLower;
 }
@@ -796,13 +794,19 @@ function readAllStudentsFromStorage(): StudentEntry[] {
     const existing = studentMap.get(mapKey);
     const resolvedId = resolveStudentRecordId(item, existing);
     const resolvedName = rawName || existing?.name || resolvedId;
+    const resolvedUsername = resolvedName;
+    const resolvedPassword = String(
+      item.password || item.defaultPassword || existing?.password || existing?.defaultPassword || resolvedId
+    ).trim();
     const verified = isStudentFaceVerified(item) || Boolean(existing?.isVerified);
 
     studentMap.set(mapKey, {
       ...existing,
       id: resolvedId,
       name: resolvedName,
-      username: uname || existing?.username || resolvedName.toLowerCase(),
+      username: resolvedUsername,
+      password: resolvedPassword,
+      defaultPassword: existing?.defaultPassword || resolvedPassword,
       email: item.email || existing?.email || "",
       photoUrl: item.photoUrl || item.avatar || existing?.photoUrl || "",
       avatar: item.avatar || item.photoUrl || existing?.avatar || "",
@@ -887,7 +891,7 @@ function readAllSubjectsFromStorage(): SubjectEntry[] {
 
 // Read all registered teachers from storage while excluding deleted teachers
 function readAllTeachersFromStorage(): TeacherAccount[] {
-  if (typeof window === "undefined") return [DEFAULT_LORENZO_TEACHER];
+  if (typeof window === "undefined") return [DEFAULT_TEACHER];
   const deletedSet = readDeletedRegistry(DELETED_TEACHERS_KEY);
   const teacherMap = new Map<string, TeacherAccount>();
 
@@ -897,13 +901,13 @@ function readAllTeachersFromStorage(): TeacherAccount[] {
       .filter(Boolean)
       .some((k) => deletedSet.has(k));
 
-  const lorenzoDeleted =
-    deletedSet.has("lorenzo_birao") ||
-    deletedSet.has("lorenzo birao") ||
-    deletedSet.has("lorenzo.birao@edu.com");
+  const Deleted =
+    deletedSet.has("") ||
+    deletedSet.has("") ||
+    deletedSet.has("");
 
-  if (!lorenzoDeleted) {
-    teacherMap.set("lorenzo_birao", DEFAULT_LORENZO_TEACHER);
+  if (!Deleted) {
+    teacherMap.set("", DEFAULT_TEACHER);
   }
 
   for (const key of TEACHER_LIST_KEYS) {
@@ -922,10 +926,10 @@ function readAllTeachersFromStorage(): TeacherAccount[] {
         const tNameLower = String(t.name || t.fullName || t.username || "")
           .trim()
           .toLowerCase();
-        const isLorenzo =
-          String(t.id || "").toLowerCase() === "lorenzo_birao" ||
-          tNameLower.includes("lorenzo birao");
-        const tId = isLorenzo ? "lorenzo_birao" : String(t.id || t.username || t.name || "").trim();
+        const is =
+          String(t.id || "").toLowerCase() === "" ||
+          tNameLower.includes("");
+        const tId = is ? "" : String(t.id || t.username || t.name || "").trim();
         if (!tId) continue;
         const mapKey = tId.toLowerCase();
         const existing = teacherMap.get(mapKey);
@@ -993,8 +997,7 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
   const [subjectDrafts, setSubjectDrafts] = useState<string[]>([""]);
   const [subjectTeacherSearch, setSubjectTeacherSearch] = useState("");
   const [newSubjectTeacherId, setNewSubjectTeacherId] = useState("");
-
-  // Step 3: Create Student Verification (Auto 6-Digit Unique Student ID = Password, Full Name = Username, Email Optional)
+  // Step 3: Create Student Verification (Auto 6-Digit Unique Default Password, Full Name = Username, Email Optional)
   const [newStudentName, setNewStudentName] = useState("");
   const [newStudentEmail, setNewStudentEmail] = useState("");
   const [enrolledStudentSearch, setEnrolledStudentSearch] = useState("");
@@ -1052,10 +1055,23 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
         if (!key) continue;
         const existing = map.get(key);
         const preservedId = resolveStudentRecordId(item, existing);
+        const resolvedName = item.name || existing?.name || preservedId;
+        const resolvedPassword = String(
+          item.password ||
+            item.defaultPassword ||
+            existing?.password ||
+            existing?.defaultPassword ||
+            preservedId
+        ).trim();
+
         map.set(key, {
           ...existing,
           ...item,
-          id: preservedId
+          id: preservedId,
+          name: resolvedName,
+          username: resolvedName,
+          password: resolvedPassword,
+          defaultPassword: existing?.defaultPassword || resolvedPassword
         });
       }
       return attachLatestPhotosToStudents(Array.from(map.values()));
@@ -1602,7 +1618,6 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
 
     setSuccessMsg(`Deleted student "${label}" and cleared all associated records from the system.`);
   };
-
   // Step 2: Add / Remove / Submit Multiple Subjects
   const handleAddSubjectRow = () => {
     setSubjectDrafts((prev) => [...prev, ""]);
@@ -1675,7 +1690,7 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
     setLoading(false);
   };
 
-  // Step 3: Auto-generate unique 6-digit Student ID (= initial password) with Full Name as username & optional email
+  // Step 3: Full Name = Username, System 6-digit = Default Password (editable later by student)
   const handleCreateStudentVerification = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newStudentName.trim()) return;
@@ -1686,12 +1701,14 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
 
     const fullNameClean = newStudentName.trim();
     const generatedSixDigitId = generateUniqueSixDigitId(students);
+    const generatedSixDigitPassword = generatedSixDigitId;
 
     const pendingStudent: StudentEntry = {
       id: generatedSixDigitId,
       name: fullNameClean,
       username: fullNameClean,
-      password: generatedSixDigitId,
+      password: generatedSixDigitPassword,
+      defaultPassword: generatedSixDigitPassword,
       email: newStudentEmail.trim(),
       isVerified: false,
       verificationStatus: "Pending Verification"
@@ -1701,17 +1718,27 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
       const res = await fetch("/api/admin/students", {
         method: "POST",
         headers: authHeaders,
-        body: JSON.stringify(pendingStudent)
+        body: JSON.stringify({
+          ...pendingStudent,
+          password: generatedSixDigitPassword,
+          defaultPassword: generatedSixDigitPassword
+        })
       });
       const data = await res.json();
+      const resolvedPassword = String(
+        data?.credentials?.defaultPassword ||
+          data?.student?.password ||
+          generatedSixDigitPassword
+      ).trim();
       const createdStudent: StudentEntry =
         data?.success && data?.student
           ? {
               ...data.student,
               id: String(data.student.id || data.student.studentId || generatedSixDigitId),
               name: data.student.name || fullNameClean,
-              username: data.student.username || fullNameClean,
-              password: generatedSixDigitId,
+              username: data.student.name || data.student.username || fullNameClean,
+              password: resolvedPassword,
+              defaultPassword: resolvedPassword,
               email: data.student.email ?? newStudentEmail.trim(),
               isVerified: Boolean(data.student.isVerified),
               verificationStatus: data.student.isVerified ? "Verified" : "Pending Verification"
@@ -1728,7 +1755,7 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
       setNewStudentName("");
       setNewStudentEmail("");
       setSuccessMsg(
-        `Created "${createdStudent.name}" | Username: "${createdStudent.username}" | Student ID & Initial Password: ${createdStudent.id} (can be changed in Student Portal).`
+        `Created "${createdStudent.name}" | Username: "${createdStudent.username}" | Default 6-Digit Password: ${createdStudent.password} (student can change password later).`
       );
     } catch {
       persistStudentsList([
@@ -1741,7 +1768,7 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
       setNewStudentName("");
       setNewStudentEmail("");
       setSuccessMsg(
-        `Created "${pendingStudent.name}" | Username: "${pendingStudent.username}" | Student ID & Initial Password: ${pendingStudent.id} (can be changed in Student Portal).`
+        `Created "${pendingStudent.name}" | Username: "${pendingStudent.username}" | Default 6-Digit Password: ${pendingStudent.password} (student can change password later).`
       );
     } finally {
       setLoading(false);
@@ -2378,7 +2405,7 @@ useEffect(() => {
         </div>
       )}
 
-      {/* 3. CREATE STUDENT VERIFICATION (AUTO 6-DIGIT UNIQUE ID = PASSWORD, FULL NAME = USERNAME, EMAIL OPTIONAL) */}
+      {/* 3. CREATE STUDENT VERIFICATION (FULL NAME = USERNAME, SYSTEM 6-DIGIT = DEFAULT PASSWORD) */}
       {flowStep === 3 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 text-xs">
           <form
@@ -2387,10 +2414,9 @@ useEffect(() => {
           >
             <h2 className="text-base font-bold text-emerald-400">Create Student Verification</h2>
             <p className="text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/25 rounded-xl px-3 py-2">
-              System automatically assigns a unique <strong>6-digit Student ID</strong> for each
-              student. Their <strong>Username</strong> is their <strong>Full Name</strong>, and their{" "}
-              <strong>Initial Password</strong> is their <strong>6-digit Student ID</strong> (editable
-              inside their Student Portal).
+              Student <strong>Username</strong> is their <strong>Full Name</strong>, and the system
+              automatically generates a <strong>6-digit Default Password</strong> (which the student
+              can change later).
             </p>
 
             <div>
@@ -2421,7 +2447,7 @@ useEffect(() => {
               disabled={loading}
               className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold transition cursor-pointer"
             >
-              {loading ? "Generating ID..." : "Create Student Verification"}
+              {loading ? "Generating Default Password..." : "Create Student Verification"}
             </button>
           </form>
 
@@ -2439,7 +2465,7 @@ useEffect(() => {
                 type="text"
                 value={enrolledStudentSearch}
                 onChange={(e) => setEnrolledStudentSearch(e.target.value)}
-                placeholder="e.g. Juan Dela Cruz or 6-digit ID"
+                placeholder="e.g. Juan Dela Cruz or 6-digit password"
                 className="w-full pl-9 pr-3.5 py-2.5 rounded-xl bg-[#131b2e] border border-slate-700 text-white"
               />
             </div>
@@ -2451,6 +2477,7 @@ useEffect(() => {
                 filteredEnrolledStudents.map((st) => {
                   const stImg = readStudentPhotoGlobal(st) || st.photoUrl || st.avatar || "";
                   const stName = st.name || st.username || "Student";
+                  const stPass = st.password || st.defaultPassword || st.id;
                   const verified = Boolean(st.isVerified || stImg);
 
                   return (
@@ -2485,7 +2512,7 @@ useEffect(() => {
                             </span>
                           </div>
                           <p className="text-[11px] text-slate-400 font-mono truncate">
-                            Student ID &amp; Password: {st.id}
+                            Username: {st.username || stName} • 6-Digit Password: {stPass}
                             {st.assignedTeacherName ? ` • Teacher: ${st.assignedTeacherName}` : ""}
                           </p>
                         </div>
@@ -2509,7 +2536,6 @@ useEffect(() => {
           </div>
         </div>
       )}
-
       {/* 4. ASSIGN STUDENT TO A TEACHER (SEARCHABLE STUDENT & SEARCHABLE TEACHER + CLICK TO UNSELECT) */}
       {flowStep === 4 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 text-xs">
@@ -2525,7 +2551,7 @@ useEffect(() => {
                 type="text"
                 value={assignStudentSearch}
                 onChange={(e) => setAssignStudentSearch(e.target.value)}
-                placeholder="e.g. Juan Dela Cruz or 6-digit ID"
+                placeholder="e.g. Juan Dela Cruz or 6-digit password"
                 className="w-full pl-9 pr-3.5 py-2.5 rounded-xl bg-[#131b2e] border border-slate-700 text-white"
               />
             </div>
@@ -2537,6 +2563,7 @@ useEffect(() => {
                 filteredAssignStudents.map((st) => {
                   const stImg = readStudentPhotoGlobal(st) || st.photoUrl || st.avatar || "";
                   const stName = st.name || st.username || "Student";
+                  const stPass = st.password || st.defaultPassword || st.id;
                   const isSelected = String(st.id) === String(selectedStudentId);
                   const verified = Boolean(st.isVerified || stImg);
 
@@ -2580,7 +2607,7 @@ useEffect(() => {
                             </span>
                           </div>
                           <p className="text-[11px] text-slate-400 font-mono truncate">
-                            ID: {st.id}
+                            Password: {stPass}
                             {st.assignedTeacherName ? ` • Teacher: ${st.assignedTeacherName}` : ""}
                           </p>
                         </div>
@@ -2630,7 +2657,9 @@ useEffect(() => {
                   <p className="text-[10px] uppercase text-slate-400 font-bold">Selected Student</p>
                   <p className="text-sm font-bold text-emerald-300 mt-0.5">
                     {selectedStudentObj
-                      ? `${selectedStudentObj.name || selectedStudentObj.username} (${selectedStudentObj.id})`
+                      ? `${selectedStudentObj.name || selectedStudentObj.username} (Pass: ${
+                          selectedStudentObj.password || selectedStudentObj.defaultPassword || selectedStudentObj.id
+                        })`
                       : "Click a student on the left"}
                   </p>
                 </div>
@@ -2864,7 +2893,10 @@ useEffect(() => {
                       Username: {inspectedProfile.data.username || inspectedProfile.data.name}
                     </p>
                     <p className="text-slate-400 font-mono">
-                      Student ID &amp; Password: {inspectedProfile.data.id}
+                      Default 6-Digit Password:{" "}
+                      {inspectedProfile.data.password ||
+                        inspectedProfile.data.defaultPassword ||
+                        inspectedProfile.data.id}
                     </p>
                     <p className="text-amber-300 font-bold mt-0.5">
                       Status:{" "}

@@ -88,7 +88,6 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
 
-  // Holds currently clicked profile (teacher, student, or section) for inspection
   const [selectedProfile, setSelectedProfile] = useState<SelectedProfileView>(null);
 
   const [expandedSections, setExpandedSections] = useState<{ [key: string]: boolean }>({});
@@ -111,13 +110,12 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
     Authorization: `Bearer ${getAuthToken()}`,
   };
 
-  // Fallback teacher profile when session data has not loaded yet
   const [teacher, setTeacher] = useState(() => {
     const fallbackProfile = {
-      id: "lorenzo",
-      name: "Lorenzo Birao",
-      username: "lorenzo",
-      email: "Lorenzo@edu.com",
+      id: "",
+      name: "",
+      username: "",
+      email: "",
       photoUrl: ""
     };
     const savedPhoto = readTeacherPhotoGlobal(fallbackProfile);
@@ -145,14 +143,12 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
   const [generatedImageUrl, setGeneratedImageUrl] = useState("");
   const [qrLoading, setQrLoading] = useState(false);
 
-  // Sync student profile pictures globally across lists
   const applyStudentPhotos = (list: Student[]): Student[] =>
     (Array.isArray(list) ? list : []).map((st) => {
       const synced = readStudentPhotoGlobal(st) || st?.photoUrl || st?.avatar || "";
       return synced ? { ...st, photoUrl: synced, avatar: synced } : st;
     });
 
-  // Load any admin-assigned students stored locally when backend state is unavailable
   const readLocalAdminAssignments = (): Student[] => {
     if (typeof window === "undefined") return [];
     const keys = [
@@ -188,10 +184,10 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
 
   const fetchTeacherData = async () => {
     const fallbackProfile = {
-      id: "lorenzo",
-      name: "Lorenzo Birao",
-      username: "lorenzo",
-      email: "Lorenzo@edu.com"
+      id: "",
+      name: "",
+      username: "",
+      email: ""
     };
 
     try {
@@ -250,7 +246,8 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
       });
       const data = await res.json();
       if (data?.success) {
-        setAssignedSubjects(Array.isArray(data.assignedSubjects) ? data.assignedSubjects : []);
+        const loadedSubjects: Subject[] = Array.isArray(data.assignedSubjects) ? data.assignedSubjects : [];
+        setAssignedSubjects(loadedSubjects);
 
         const mergedAdminStudents =
           Array.isArray(data.adminAssignedStudents) && data.adminAssignedStudents.length > 0
@@ -271,8 +268,8 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
         if (formattedSections.length > 0 && !qrSectionId) {
           setQrSectionId(formattedSections[0].id);
         }
-        if (Array.isArray(data.assignedSubjects) && data.assignedSubjects.length > 0 && !sectionForm.subjectId) {
-          setSectionForm((prev) => ({ ...prev, subjectId: data.assignedSubjects[0].id }));
+        if (loadedSubjects.length > 0 && !sectionForm.subjectId) {
+          setSectionForm((prev) => ({ ...prev, subjectId: loadedSubjects[0].id }));
         }
       }
     } catch (err) {
@@ -284,7 +281,6 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
     fetchTeacherData();
   }, []);
 
-  // Listen to live profile updates and admin student assignment changes
   useEffect(() => {
     const syncLivePhotosAndAssignments = () => {
       setTeacher((prev) => {
@@ -509,13 +505,11 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
     }
   };
 
-  // Assign an Admin Student to a teacher-created section (such as A1)
   const handleAssignStudentToSection = async (studentId: string, sectionId: string) => {
     setError("");
     setSuccessMsg("");
     const targetSection = sections.find((s) => String(s.id) === String(sectionId));
 
-    // Optimistically reflect section assignment on Admin Student list while keeping Admin Student badge
     setAdminAssignedStudents((prev) =>
       prev.map((st) =>
         String(st.id) === String(studentId)
@@ -592,8 +586,6 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
   };
 
   const pendingApprovalRecords = records.filter((r) => String(r?.status || "") === "Pending Approval");
-
-  // Collect all subject names assigned to this teacher (supports multiple subjects)
   const teacherSubjectList = assignedSubjects.map((s) => s?.name).filter(Boolean) as string[];
 
   return (
@@ -678,20 +670,19 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
       </div>
 
       <div className="flex-1 p-4 md:p-6 space-y-6 overflow-y-auto">
-        {/* Clickable Teacher Header Card */}
         <div className="bg-[#0d1322] border border-slate-800 rounded-2xl p-5 flex flex-col md:flex-row items-center justify-between gap-4 shadow-lg">
           <div
             onClick={() => setSelectedProfile({ kind: "teacher", data: teacher })}
             className="text-center md:text-left cursor-pointer group"
           >
             <h1 className="text-xl md:text-2xl font-black text-white tracking-wide uppercase group-hover:text-indigo-300 transition">
-              Welcome, Teacher <span className="text-indigo-400">{teacher.name || "Lorenzo Birao"}</span>
+              Welcome, Teacher <span className="text-indigo-400">{teacher.name || ""}</span>
             </h1>
             <p className="text-xs text-slate-400 mt-1">
-              Email: <strong className="text-slate-200">{teacher.email || "Lorenzo@edu.com"}</strong>
+              Email: <strong className="text-slate-200">{teacher.email || ""}</strong>
               {teacherSubjectList.length > 0 && (
                 <span className="ml-2 text-indigo-300 font-bold">
-                  • Subjects: {teacherSubjectList.join(", ")}
+                  - Subjects: {teacherSubjectList.join(", ")}
                 </span>
               )}
             </p>
@@ -721,7 +712,7 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
                 onClick={() => setSelectedProfile({ kind: "teacher", data: teacher })}
                 className="text-xs font-bold text-white hover:text-indigo-300 transition cursor-pointer text-left block"
               >
-                {teacher.name || "Lorenzo Birao"}
+                {teacher.name || ""}
               </button>
               <button
                 type="button"
@@ -1108,7 +1099,7 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
                             Student ID: <span className="text-emerald-400 font-bold">{student.id}</span>
                             {teacherSubjectList.length > 0 && (
                               <span className="ml-2 text-indigo-300 font-sans font-semibold">
-                                • Teacher Subject(s): {teacherSubjectList.join(" • ")}
+                                - Teacher Subject(s): {teacherSubjectList.join(" • ")}
                               </span>
                             )}
                           </p>
@@ -1308,7 +1299,6 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
         )}
       </div>
 
-      {/* Clickable profile inspection modal for teacher, student, and section */}
       {selectedProfile && (
         <div
           onClick={() => setSelectedProfile(null)}
@@ -1324,7 +1314,7 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
                   {readTeacherPhotoGlobal(selectedProfile.data) ? (
                     <img
                       src={readTeacherPhotoGlobal(selectedProfile.data)}
-                      alt={selectedProfile.data?.name || "Lorenzo Birao"}
+                      alt={selectedProfile.data?.name || ""}
                       className="w-16 h-16 rounded-full object-cover border-2 border-indigo-500"
                     />
                   ) : (
@@ -1334,9 +1324,9 @@ export default function TeacherDashboard({ token, onLogout, onLogOut }: TeacherD
                   )}
                   <div>
                     <h3 className="text-sm font-black text-white">
-                      {selectedProfile.data?.name || "Lorenzo Birao"}
+                      {selectedProfile.data?.name || ""}
                     </h3>
-                    <p className="text-slate-400">{selectedProfile.data?.email || "Lorenzo@edu.com"}</p>
+                    <p className="text-slate-400">{selectedProfile.data?.email || ""}</p>
                   </div>
                 </div>
                 <div className="bg-[#131b2e] border border-slate-800 rounded-xl p-3 space-y-1">

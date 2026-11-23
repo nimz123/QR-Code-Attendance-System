@@ -1,477 +1,817 @@
 import express from 'express';
 import cors from 'cors';
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import QRCode from 'qrcode';
 import path from 'path';
-import fs from 'fs';
+import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 const app = express();
 
-app.use(express.json({ limit: '50mb' }));
+const PORT = Number(process.env.PORT || 5001);
+const JWT_SECRET = process.env.JWT_SECRET || 'qr_attendance_super_secret_key_2026';
+
 app.use(cors());
+app.use(express.json({ limit: '15mb' }));
+app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
-const JWT_SECRET = process.env.JWT_SECRET || 'edulectrical_super_secret_key_2026';
+function verifyToken(req: any, res: any, next: any) {
+  const authHeader = req.headers?.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
 
-// Seed Default Admin on Startup
-async function seedAdmin() {
+  if (!token) {
+    return res.status(401).json({ success: false, error: 'Unauthorized: Missing token' });
+  }
+
   try {
-    const hashedPassword = await bcrypt.hash('changeme123', 10);
-    const existingAdmin = await prisma.teacher.findFirst({
-      where: { username: 'admin' },
-    });
-
-    if (!existingAdmin) {
-      await prisma.teacher.create({
-        data: {
-          username: 'admin',
-          name: 'System Administrator',
-          passwordHash: hashedPassword,
-          email: 'admin@edulectrical.com',
-        },
-      });
-      console.log('Default admin seeded successfully.');
-    }
-  } catch (error) {
-    console.error('Error seeding admin:', error);
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    return next();
+  } catch {
+    return res.status(401).json({ success: false, error: 'Unauthorized: Invalid or expired token' });
   }
 }
 
-// Middleware for JWT Verification
-const authenticateToken = (req: any, res: any, next: any) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-  if (!token) return res.status(401).json({ success: false, error: 'Access token required' });
+async function generateUnique6DigitId(model: 'teacher' | 'student'): Promise<string> {
+  for (let i = 0; i < 50; i++) {
+    const candidate = String(Math.floor(100000 + Math.random() * 900000));
+    if (model === 'teacher') {
+      const existing = await prisma.teacher.findUnique({ where: { id: candidate } });
+      if (!existing) return candidate;
+    } else {
+      const existing = await prisma.student.findUnique({ where: { id: candidate } });
+      if (!existing) return candidate;
+    }
+  }
+  return `${Date.now()}`.slice(-6);
+}
 
-  jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
-    if (err) return res.status(403).json({ success: false, error: 'Invalid or expired token' });
-    req.user = user;
-    next();
-  });
-};
+app.get('/api/health', async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    return res.json({ success: true, status: 'ok', database: 'connected' });
+  } catch (err) {
+    console.error('Health check failed:', err);
+    return res.status(500).json({ success: false, status: 'error' });
+  }
+});
 
-// ================= AUTHENTICATION ROUTES =================
+// ==========================================
+// AUTHENTICATION ROUTES
+// ==========================================
 
 app.post('/api/auth/login', async (req, res) => {
   try {
-    const { username, password } = req.body;
+    const rawIdentifier = String(
+      req.body?.username ?? req.body?.idNumber ?? req.body?.email ?? ''
+    ).trim();
+    const password = String(req.body?.password ?? '').trim();
+    const requestedRole = String(req.body?.role ?? '').trim().toLowerCase();
 
-    // 1. Check Admin Login
-    if (username === 'admin' && (password === 'changeme123' || password === 'admin')) {
-      const token = jwt.sign({ id: 'admin', username: 'admin', role: 'admin' }, JWT_SECRET, { expiresIn: '7d' });
+    if (!rawIdentifier || !password) {
+      return res
+        .status(400)
+        .json({ success: false, error: 'ID/Username and password are required' });
+    }
+
+    // 1. Admin login
+    if (
+      rawIdentifier.toLowerCase() === 'admin' &&
+      (password === 'changeme123' || password === 'admin')
+    ) {
+      if (requestedRole && requestedRole !== 'admin') {
+        return res.status(403).json({ success: false, error: 'Access Denied' });
+      }
+      const token = jwt.sign(
+        { id: 'admin', username: 'admin', role: 'admin' },
+        JWT_SECRET,
+        { expiresIn: '7d' }
+      );
       return res.json({
         success: true,
         token,
-        user: { id: 'admin', username: 'admin', role: 'admin', name: 'Administrator' },
+        user: {
+          id: 'admin',
+          username: 'admin',
+          role: 'admin',
+          name: 'Administrator',
+          email: 'admin@edu.com',
+        },
       });
     }
 
-    // 2. Check Teacher Login
-    const teacher = await prisma.teacher.findUnique({ where: { username } });
-    if (teacher && (teacher.passwordHash === password || await bcrypt.compare(password, teacher.passwordHash))) {
-      const token = jwt.sign({ id: teacher.id, username: teacher.username, role: 'teacher' }, JWT_SECRET, { expiresIn: '7d' });
+    // 2. Teacher login
+    const teacher = await prisma.teacher.findFirst({
+      where: {
+        OR: [
+          { id: rawIdentifier },
+          { username: { equals: rawIdentifier, mode: 'insensitive' } },
+          { email: { equals: rawIdentifier, mode: 'insensitive' } },
+        ],
+      },
+    });
+
+    if (teacher) {
+      const isTeacherPasswordValid =
+        teacher.passwordHash === password ||
+        (await bcrypt.compare(password, teacher.passwordHash).catch(() => false));
+
+      if (isTeacherPasswordValid) {
+        if (requestedRole && requestedRole !== 'teacher') {
+          return res.status(403).json({ success: false, error: 'Access Denied' });
+        }
+        const token = jwt.sign(
+          { id: teacher.id, username: teacher.username, role: 'teacher' },
+          JWT_SECRET,
+          { expiresIn: '7d' }
+        );
+        return res.json({
+          success: true,
+          token,
+          user: {
+            id: teacher.id,
+            username: teacher.username,
+            role: 'teacher',
+            name: teacher.name,
+            email: teacher.email || '',
+            photoUrl: teacher.photo || '',
+          },
+        });
+      }
+    }
+
+    // 3. Student login (exact ID first, then case-insensitive username/name + password validation)
+    const isPassValidForStudent = async (st: any): Promise<boolean> => {
+      if (!st) return false;
+      if (st.passwordHash) {
+        const matchedHash = await bcrypt.compare(password, st.passwordHash).catch(() => false);
+        if (matchedHash) return true;
+        if (password === st.passwordHash) return true;
+      }
+      if (password === st.id) return true;
+      return false;
+    };
+
+    let matchedStudent = await prisma.student.findUnique({
+      where: { id: rawIdentifier },
+      include: {
+        subject: { include: { teacher: true } },
+        section: true,
+      },
+    });
+
+    if (matchedStudent) {
+      const valid = await isPassValidForStudent(matchedStudent);
+      if (!valid) matchedStudent = null;
+    } else {
+      const candidates = await prisma.student.findMany({
+        where: {
+          OR: [
+            { username: { equals: rawIdentifier, mode: 'insensitive' } },
+            { name: { equals: rawIdentifier, mode: 'insensitive' } },
+          ],
+        },
+        include: {
+          subject: { include: { teacher: true } },
+          section: true,
+        },
+      });
+
+      for (const candidate of candidates) {
+        if (await isPassValidForStudent(candidate)) {
+          matchedStudent = candidate;
+          break;
+        }
+      }
+    }
+
+    // Fallback sync: if a student with this name/username is not yet in DB and uses a 6-digit default password,
+    // persist it into PostgreSQL so login & subsequent password changes work immediately.
+    if (!matchedStudent && /^\d{6}$/.test(password) && !/^\d+$/.test(rawIdentifier)) {
+      const existingNameOrUname = await prisma.student.findFirst({
+        where: {
+          OR: [
+            { username: { equals: rawIdentifier, mode: 'insensitive' } },
+            { name: { equals: rawIdentifier, mode: 'insensitive' } },
+          ],
+        },
+      });
+      const existingId = await prisma.student.findUnique({ where: { id: password } });
+
+      if (!existingNameOrUname && !existingId) {
+        const passwordHash = await bcrypt.hash(password, 10);
+        matchedStudent = await prisma.student.create({
+          data: {
+            id: password,
+            name: rawIdentifier,
+            username: rawIdentifier,
+            passwordHash,
+            isVerified: false,
+          },
+          include: {
+            subject: { include: { teacher: true } },
+            section: true,
+          },
+        });
+      }
+    }
+
+    if (matchedStudent) {
+      if (requestedRole && requestedRole !== 'student') {
+        return res.status(403).json({ success: false, error: 'Access Denied' });
+      }
+      const token = jwt.sign(
+        { id: matchedStudent.id, username: matchedStudent.username, role: 'student' },
+        JWT_SECRET,
+        { expiresIn: '7d' }
+      );
       return res.json({
         success: true,
         token,
+        user: {
+          id: matchedStudent.id,
+          username: matchedStudent.username,
+          role: 'student',
+          name: matchedStudent.name,
+          photoUrl: matchedStudent.photoUrl || matchedStudent.biometricPhoto || '',
+          isVerified: Boolean(matchedStudent.isVerified),
+          sectionId: matchedStudent.sectionId || null,
+          subjectId: matchedStudent.subjectId || null,
+          subject: matchedStudent.subject || null,
+          section: matchedStudent.section || null,
+        },
+      });
+    }
+
+    return res
+      .status(401)
+      .json({ success: false, error: 'Invalid ID/username or password' });
+  } catch (error) {
+    console.error('Login error:', error);
+    return res.status(500).json({ success: false, error: 'Server error during login' });
+  }
+});
+
+app.get('/api/auth/me', verifyToken, async (req: any, res) => {
+  try {
+    const { id, role } = req.user || {};
+
+    if (role === 'admin') {
+      return res.json({
+        success: true,
+        user: {
+          id: 'admin',
+          username: 'admin',
+          role: 'admin',
+          name: 'Administrator',
+          email: 'admin@edu.com',
+        },
+      });
+    }
+
+    if (role === 'teacher') {
+      const teacher = await prisma.teacher.findUnique({ where: { id } });
+      if (!teacher) {
+        return res.status(404).json({ success: false, error: 'Teacher not found' });
+      }
+      return res.json({
+        success: true,
         user: {
           id: teacher.id,
           username: teacher.username,
           role: 'teacher',
           name: teacher.name,
-          email: teacher.email,
-          photoUrl: teacher.photo,
+          email: teacher.email || '',
+          photoUrl: teacher.photo || '',
         },
       });
     }
 
-    // 3. Check Student Login
-    const student = await prisma.student.findFirst({
-      where: {
-        OR: [{ username }, { id: username }],
-      },
-      include: { subject: { include: { teacher: true } }, section: true },
-    });
-
-    if (student && (student.passwordHash === password || student.id === password)) {
-      const token = jwt.sign({ id: student.id, username: student.username, role: 'student' }, JWT_SECRET, { expiresIn: '7d' });
+    if (role === 'student') {
+      const student = await prisma.student.findUnique({
+        where: { id },
+        include: {
+          subject: { include: { teacher: true } },
+          section: true,
+        },
+      });
+      if (!student) {
+        return res.status(404).json({ success: false, error: 'Student not found' });
+      }
       return res.json({
         success: true,
-        token,
         user: {
           id: student.id,
           username: student.username,
           role: 'student',
           name: student.name,
-          photoUrl: student.photoUrl,
-          subject: student.subject,
-          section: student.section,
+          photoUrl: student.photoUrl || student.biometricPhoto || '',
+          isVerified: Boolean(student.isVerified),
+          sectionId: student.sectionId || null,
+          subjectId: student.subjectId || null,
+          subject: student.subject || null,
+          section: student.section || null,
         },
       });
     }
 
-    res.status(401).json({ success: false, error: 'Invalid username or password' });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Server error during login' });
+    return res.status(400).json({ success: false, error: 'Invalid user role' });
+  } catch (err) {
+    console.error('GET /api/auth/me error:', err);
+    return res.status(500).json({ success: false, error: 'Failed to fetch current user' });
   }
 });
 
-app.get('/api/auth/me', authenticateToken, async (req: any, res: any) => {
-  try {
-    if (req.user.role === 'admin') {
-      return res.json({
-        success: true,
-        user: { id: 'admin', name: 'System Administrator', username: 'admin', role: 'admin', email: 'admin@edulectrical.com' },
-      });
-    }
+// ==========================================
+// ADMIN ROUTES
+// ==========================================
 
-    if (req.user.role === 'teacher') {
-      const teacher = await prisma.teacher.findUnique({ where: { id: req.user.id } });
-      if (!teacher) return res.status(404).json({ success: false, error: 'Teacher not found' });
-      return res.json({
-        success: true,
-        user: {
-          id: teacher.id,
-          name: teacher.name,
-          username: teacher.username,
-          email: teacher.email || `${teacher.username}@edu.com`,
-          photoUrl: teacher.photo || '',
-          role: 'teacher',
+app.get('/api/state/admin', verifyToken, async (_req, res) => {
+  try {
+    const [teachers, students, subjects, sections, records] = await Promise.all([
+      prisma.teacher.findMany({ orderBy: { createdAt: 'desc' } }),
+      prisma.student.findMany({
+        include: {
+          subject: { include: { teacher: true } },
+          section: true,
         },
-      });
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.subject.findMany({
+        include: {
+          teacher: true,
+          students: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.section.findMany({
+        include: {
+          teacher: true,
+          students: true,
+          schedules: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.attendanceRecord.findMany({
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+
+    return res.json({
+      success: true,
+      teachers,
+      students,
+      subjects,
+      sections,
+      records,
+    });
+  } catch (err) {
+    console.error('GET /api/state/admin error:', err);
+    return res.status(500).json({ success: false, error: 'Failed to load admin state' });
+  }
+});
+
+app.post('/api/admin/teachers', verifyToken, async (req, res) => {
+  try {
+    const name = String(req.body?.name || '').trim();
+    const username = String(req.body?.username || name).trim();
+    const email = String(
+      req.body?.email || `${username.toLowerCase().replace(/\s+/g, '.')}@edu.com`
+    ).trim();
+    const rawPassword = String(req.body?.password || '').trim();
+
+    if (!name || !username) {
+      return res.status(400).json({ success: false, error: 'Name and username are required' });
     }
 
-    const student = await prisma.student.findUnique({
-      where: { id: req.user.id },
-      include: { subject: { include: { teacher: true } }, section: true },
-    });
-    if (!student) return res.status(404).json({ success: false, error: 'Student not found' });
-    return res.json({ success: true, user: { ...student, role: 'student' } });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to fetch user profile' });
-  }
-});
+    const id = await generateUnique6DigitId('teacher');
+    const passwordToHash = rawPassword || id;
+    const passwordHash = await bcrypt.hash(passwordToHash, 10);
 
-// ================= ADMIN & TEACHER ENDPOINTS =================
-
-app.get('/api/admin/dashboard', authenticateToken, async (req: any, res: any) => {
-  try {
-    const teachers = await prisma.teacher.findMany({
-      where: { username: { not: 'admin' } },
-      include: { subjects: true, sections: true },
-      orderBy: { createdAt: 'desc' },
-    });
-    const subjects = await prisma.subject.findMany({
-      include: { teacher: true, students: true },
-      orderBy: { createdAt: 'desc' },
-    });
-    const students = await prisma.student.findMany({
-      include: { subject: { include: { teacher: true } }, section: true },
-      orderBy: { createdAt: 'desc' },
-    });
-    res.json({ success: true, teachers, subjects, students });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to load admin data' });
-  }
-});
-
-app.post('/api/admin/teachers', authenticateToken, async (req: any, res: any) => {
-  try {
-    const { name, username, password, email } = req.body;
-    const existing = await prisma.teacher.findUnique({ where: { username } });
-    if (existing) return res.status(400).json({ success: false, error: 'Username already exists.' });
-
-    const passwordHash = await bcrypt.hash(password, 10);
     const teacher = await prisma.teacher.create({
-      data: { name, username, passwordHash, email },
-    });
-    res.json({ success: true, teacher });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to create teacher account.' });
-  }
-});
-
-app.delete('/api/admin/teachers/:id', authenticateToken, async (req: any, res: any) => {
-  try {
-    await prisma.teacher.delete({ where: { id: req.params.id } });
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to delete teacher.' });
-  }
-});
-
-app.post('/api/admin/subjects/bulk', authenticateToken, async (req: any, res: any) => {
-  try {
-    const { subjectNames } = req.body;
-    const created = [];
-    for (const rawName of subjectNames) {
-      const name = rawName.trim();
-      if (!name) continue;
-      const existing = await prisma.subject.findUnique({ where: { name } });
-      if (!existing) {
-        const sub = await prisma.subject.create({ data: { name } });
-        created.push(sub);
-      }
-    }
-    res.json({ success: true, created });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to create subjects.' });
-  }
-});
-
-app.put('/api/admin/subjects/:id/assign-teacher', authenticateToken, async (req: any, res: any) => {
-  try {
-    const { teacherId } = req.body;
-    const subject = await prisma.subject.update({
-      where: { id: req.params.id },
-      data: { teacherId: teacherId || null },
-      include: { teacher: true },
-    });
-    res.json({ success: true, subject });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to assign teacher to subject.' });
-  }
-});
-
-app.delete('/api/admin/subjects/:id', authenticateToken, async (req: any, res: any) => {
-  try {
-    await prisma.subject.delete({ where: { id: req.params.id } });
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to delete subject.' });
-  }
-});
-
-// ================= ADMIN STUDENT ENDPOINTS =================
-
-app.post('/api/admin/students', authenticateToken, async (req: any, res: any) => {
-  try {
-    const { idNumber, name, subjectId } = req.body;
-    const cleanId = idNumber.trim();
-    const cleanName = name.trim();
-
-    const existingId = await prisma.student.findUnique({ where: { id: cleanId } });
-    if (existingId) return res.status(400).json({ success: false, error: 'Student ID Number already exists.' });
-
-    const existingUser = await prisma.student.findUnique({ where: { username: cleanName } });
-    const finalUsername = existingUser ? `${cleanName} (${cleanId})` : cleanName;
-
-    const student = await prisma.student.create({
       data: {
-        id: cleanId,
-        name: cleanName,
-        username: finalUsername,
-        passwordHash: cleanId,
-        subjectId: subjectId || null,
-        // Default unverified face status requiring admin/face verification
-        isVerified: false,
+        id,
+        name,
+        username,
+        email,
+        passwordHash,
       },
-      include: { subject: { include: { teacher: true } } },
     });
-    res.json({ success: true, student });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to create student account.' });
-  }
-});
 
-app.put('/api/admin/students/:id/enroll-subject', authenticateToken, async (req: any, res: any) => {
-  try {
-    const { subjectId } = req.body;
-    const student = await prisma.student.update({
-      where: { id: req.params.id },
-      data: { subjectId },
-      include: { subject: { include: { teacher: true } } },
+    return res.json({
+      success: true,
+      teacher,
+      defaultPassword: passwordToHash,
     });
-    res.json({ success: true, student });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to enroll student into subject.' });
+  } catch (err: any) {
+    console.error('POST /api/admin/teachers error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to create teacher' });
   }
 });
 
-// Admin verifies student face verification status
-app.put('/api/admin/students/:id/verify-face', authenticateToken, async (req: any, res: any) => {
+app.delete('/api/admin/teachers/:id', verifyToken, async (req, res) => {
   try {
-    const { isVerified } = req.body;
-    const student = await prisma.student.update({
-      where: { id: req.params.id },
-      data: { isVerified: Boolean(isVerified) },
-      include: { subject: { include: { teacher: true } }, section: true },
-    });
-    res.json({ success: true, student });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to update student verification status.' });
+    const teacherId = String(req.params.id);
+    await prisma.teacher.delete({ where: { id: teacherId } });
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('DELETE /api/admin/teachers/:id error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to delete teacher' });
   }
 });
 
-app.delete('/api/admin/students/:id', authenticateToken, async (req: any, res: any) => {
+app.post('/api/admin/subjects/bulk', verifyToken, async (req, res) => {
   try {
-    await prisma.student.delete({ where: { id: req.params.id } });
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to delete student.' });
-  }
-});
+    const teacherId = req.body?.teacherId ? String(req.body.teacherId).trim() : null;
+    const rawSubjects = Array.isArray(req.body?.subjects)
+      ? req.body.subjects.map((item: any) => (typeof item === 'string' ? item : item?.name))
+      : Array.isArray(req.body?.names)
+      ? req.body.names
+      : String(req.body?.name || '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
 
-// ================= TEACHER ENDPOINTS =================
+    const cleanedNames = rawSubjects
+      .map((s: any) => String(s || '').trim())
+      .filter((s: string) => s.length > 0);
 
-app.get('/api/state/teacher', authenticateToken, async (req: any, res: any) => {
-  try {
-    const teacherId = req.user.id;
+    if (cleanedNames.length === 0) {
+      return res.status(400).json({ success: false, error: 'Subject name is required' });
+    }
 
-    const assignedSubjects = await prisma.subject.findMany({
-      where: { teacherId },
-      include: {
-        students: {
-          include: { section: true, subject: true },
+    const createdSubjects = [];
+    for (const subName of cleanedNames) {
+      const created = await prisma.subject.upsert({
+        where: { name: subName },
+        update: {
+          ...(teacherId ? { teacherId } : {}),
         },
-      },
-      orderBy: { name: 'asc' },
+        create: {
+          name: subName,
+          teacherId: teacherId || null,
+        },
+        include: { teacher: true, students: true },
+      });
+      createdSubjects.push(created);
+    }
+
+    return res.json({
+      success: true,
+      subjects: createdSubjects,
+      subject: createdSubjects[0],
+    });
+  } catch (err: any) {
+    console.error('POST /api/admin/subjects/bulk error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to create subject' });
+  }
+});
+
+app.delete('/api/admin/subjects/:id', verifyToken, async (req, res) => {
+  try {
+    const subjectId = String(req.params.id);
+    await prisma.subject.delete({ where: { id: subjectId } });
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('DELETE /api/admin/subjects/:id error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to delete subject' });
+  }
+});
+
+app.put('/api/admin/subjects/:id/assign-teacher', verifyToken, async (req, res) => {
+  try {
+    const subjectId = String(req.params.id);
+    const teacherId = req.body?.teacherId ? String(req.body.teacherId).trim() : null;
+
+    const updated = await prisma.subject.update({
+      where: { id: subjectId },
+      data: { teacherId },
+      include: { teacher: true, students: true },
     });
 
-    const sections = await prisma.section.findMany({
-      where: { teacherId },
+    return res.json({ success: true, subject: updated });
+  } catch (err: any) {
+    console.error('PUT /api/admin/subjects/:id/assign-teacher error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to assign teacher' });
+  }
+});
+
+// Create Student: Username = Full Name, 6-digit = Default Password
+app.post('/api/admin/students', verifyToken, async (req, res) => {
+  try {
+    const name = String(req.body?.name || '').trim();
+    if (!name) {
+      return res.status(400).json({ success: false, error: 'Student name is required' });
+    }
+
+    const generatedId = await generateUnique6DigitId('student');
+    const providedId = String(req.body?.id || req.body?.studentId || '').trim();
+    const studentId = providedId || generatedId;
+
+    const defaultPassword = String(
+      req.body?.password || req.body?.defaultPassword || generatedId
+    ).trim();
+
+    const desiredUsername = String(req.body?.username || name).trim();
+    const existingByUsername = await prisma.student.findUnique({
+      where: { username: desiredUsername },
+    });
+    const finalUsername = existingByUsername ? `${name} (${studentId})` : desiredUsername;
+
+    const subjectId = req.body?.subjectId ? String(req.body.subjectId).trim() : null;
+    const sectionId = req.body?.sectionId ? String(req.body.sectionId).trim() : null;
+    const photoUrl = typeof req.body?.photoUrl === 'string' ? req.body.photoUrl : null;
+
+    const passwordHash = await bcrypt.hash(defaultPassword, 10);
+
+    const existingById = await prisma.student.findUnique({ where: { id: studentId } });
+    if (existingById) {
+      return res.status(409).json({ success: false, error: `Student ID ${studentId} already exists` });
+    }
+
+    const createdStudent = await prisma.student.create({
+      data: {
+        id: studentId,
+        name,
+        username: finalUsername,
+        passwordHash,
+        subjectId,
+        sectionId,
+        photoUrl,
+        biometricPhoto: photoUrl,
+        isVerified: Boolean(photoUrl),
+      },
       include: {
-        subject: true,
-        students: true,
-        schedules: { orderBy: { date: 'desc' } },
+        subject: { include: { teacher: true } },
+        section: true,
       },
-      orderBy: { createdAt: 'desc' },
     });
 
-    const adminAssignedStudents = assignedSubjects.flatMap((sub) =>
-      sub.students.map((st) => ({
-        ...st,
-        subjectName: sub.name,
-      }))
+    return res.json({
+      success: true,
+      student: {
+        ...createdStudent,
+        password: defaultPassword,
+        defaultPassword,
+      },
+      credentials: {
+        studentId: createdStudent.id,
+        username: createdStudent.username,
+        defaultPassword,
+      },
+    });
+  } catch (err: any) {
+    console.error('POST /api/admin/students error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to register student' });
+  }
+});
+
+app.delete('/api/admin/students/:id', verifyToken, async (req, res) => {
+  try {
+    const studentId = String(req.params.id);
+    await prisma.student.delete({ where: { id: studentId } });
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('DELETE /api/admin/students/:id error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to delete student' });
+  }
+});
+
+app.put('/api/admin/students/:id/enroll-subject', verifyToken, async (req, res) => {
+  try {
+    const studentId = String(req.params.id);
+    const subjectId = req.body?.subjectId ? String(req.body.subjectId).trim() : null;
+
+    const updated = await prisma.student.update({
+      where: { id: studentId },
+      data: { subjectId },
+      include: {
+        subject: { include: { teacher: true } },
+        section: true,
+      },
+    });
+
+    return res.json({ success: true, student: updated });
+  } catch (err: any) {
+    console.error('PUT /api/admin/students/:id/enroll-subject error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to enroll student' });
+  }
+});
+
+app.post('/api/admin/assign-student-teacher', verifyToken, async (req, res) => {
+  try {
+    const studentId = String(req.body?.studentId || '').trim();
+    const subjectId = req.body?.subjectId ? String(req.body.subjectId).trim() : null;
+    const sectionId = req.body?.sectionId ? String(req.body.sectionId).trim() : null;
+
+    if (!studentId) {
+      return res.status(400).json({ success: false, error: 'Student ID is required' });
+    }
+
+    const updated = await prisma.student.update({
+      where: { id: studentId },
+      data: {
+        ...(subjectId ? { subjectId } : {}),
+        ...(sectionId ? { sectionId } : {}),
+      },
+      include: {
+        subject: { include: { teacher: true } },
+        section: true,
+      },
+    });
+
+    return res.json({ success: true, student: updated });
+  } catch (err: any) {
+    console.error('POST /api/admin/assign-student-teacher error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to assign student to teacher' });
+  }
+});
+
+// ==========================================
+// TEACHER ROUTES
+// ==========================================
+
+app.get('/api/state/teacher', verifyToken, async (req: any, res) => {
+  try {
+    const teacherId = String(req.user?.id || '');
+
+    const [assignedSubjects, sections, allStudents, records] = await Promise.all([
+      prisma.subject.findMany({
+        where: { teacherId },
+        include: { students: true },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.section.findMany({
+        where: { teacherId },
+        include: {
+          students: {
+            include: { subject: true, section: true },
+          },
+          schedules: {
+            orderBy: { date: 'desc' },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.student.findMany({
+        include: {
+          subject: { include: { teacher: true } },
+          section: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.attendanceRecord.findMany({
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+
+    const assignedSubjectIds = new Set(assignedSubjects.map((s) => s.id));
+    const sectionIds = new Set(sections.map((sec) => sec.id));
+
+    const adminAssignedStudents = allStudents.filter(
+      (st) =>
+        (st.subjectId && assignedSubjectIds.has(st.subjectId)) ||
+        (st.sectionId && sectionIds.has(st.sectionId))
     );
 
-    const sectionIds = sections.map((s) => s.id);
-    const rawRecords = await prisma.attendanceRecord.findMany({
-      where: { sectionId: { in: sectionIds } },
-      include: { student: true },
-      orderBy: { createdAt: 'desc' },
-    });
+    const teacherRecords = records.filter((rec) => sectionIds.has(rec.sectionId));
 
-    // RESTRICTION LOGIC: If student is NOT face-verified, teacher cannot see real status (defaults to Pending Verification with caution badge)
-    const records = rawRecords.map((rec) => {
-      const isFaceVerified = rec.student?.isVerified ?? false;
-      return {
-        ...rec,
-        status: isFaceVerified ? rec.status : '⚠️ Pending Face Verification',
-        colorCode: isFaceVerified
-          ? (rec.status === 'Present' ? 'emerald' : rec.status === 'Late' ? 'amber' : 'rose')
-          : 'amber',
-      };
-    });
-
-    res.json({
+    return res.json({
       success: true,
       assignedSubjects,
       adminAssignedStudents,
-      sections: sections.map((s) => ({
-        ...s,
-        subject: s.subject?.name || '',
-      })),
-      records,
+      sections,
+      records: teacherRecords,
     });
-  } catch (error) {
-    console.error('Error fetching teacher state:', error);
-    res.status(500).json({ success: false, error: 'Failed to load teacher state.' });
+  } catch (err) {
+    console.error('GET /api/state/teacher error:', err);
+    return res.status(500).json({ success: false, error: 'Failed to load teacher dashboard state' });
   }
 });
 
-// Teacher updates profile photo (synced and visible to admin)
-app.put('/api/teacher/profile', authenticateToken, async (req: any, res: any) => {
+app.put('/api/teacher/profile', verifyToken, async (req: any, res) => {
   try {
-    const { photoUrl } = req.body;
-    const updatedTeacher = await prisma.teacher.update({
-      where: { id: req.user.id },
-      data: { photo: photoUrl },
+    const teacherId = String(req.user?.id || '');
+    const photoValue = String(req.body?.photoUrl ?? req.body?.avatar ?? req.body?.photo ?? '');
+
+    const updated = await prisma.teacher.update({
+      where: { id: teacherId },
+      data: {
+        photo: photoValue,
+      },
     });
-    res.json({ success: true, teacher: updatedTeacher });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to update profile picture.' });
+
+    return res.json({
+      success: true,
+      user: {
+        id: updated.id,
+        username: updated.username,
+        role: 'teacher',
+        name: updated.name,
+        email: updated.email || '',
+        photoUrl: updated.photo || '',
+      },
+    });
+  } catch (err: any) {
+    console.error('PUT /api/teacher/profile error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to update teacher profile' });
   }
 });
 
-app.post('/api/sections', authenticateToken, async (req: any, res: any) => {
+app.post('/api/sections', verifyToken, async (req: any, res) => {
   try {
-    const teacherId = req.user.id;
-    const { name, subjectId, room, date, startTime, endTime, absentCutoffTime, requireTeacherApproval } = req.body;
+    const teacherId = String(req.user?.id || '');
+    const name = String(req.body?.name || '').trim();
+    const subjectId = req.body?.subjectId ? String(req.body.subjectId).trim() : null;
+    const room = String(req.body?.room || '').trim();
+    const date = String(req.body?.date || new Date().toISOString().split('T')[0]).trim();
+    const startTime = String(req.body?.startTime || '08:00').trim();
+    const endTime = String(req.body?.endTime || '17:00').trim();
+    const absentCutoffTime = String(req.body?.absentCutoffTime || '08:30').trim();
+    const requireTeacherApproval = Boolean(req.body?.requireTeacherApproval);
+
+    if (!name) {
+      return res.status(400).json({ success: false, error: 'Section name is required' });
+    }
 
     const section = await prisma.section.create({
       data: {
-        name: name.trim(),
-        subjectId: subjectId || null,
+        name,
+        teacherId,
+        subjectId,
         room,
         startTime,
         endTime,
         absentCutoffTime,
-        requireTeacherApproval: Boolean(requireTeacherApproval),
-        teacherId,
-        schedules: date
-          ? {
-              create: {
-                date,
-                room: room || 'TBA',
-                startTime: startTime || '08:00',
-                absentCutoffTime: absentCutoffTime || '08:30',
-                endTime: endTime || '17:00',
-              },
-            }
-          : undefined,
+        requireTeacherApproval,
+        schedules: {
+          create: {
+            date,
+            room,
+            startTime,
+            absentCutoffTime,
+            endTime,
+          },
+        },
+      },
+      include: {
+        students: true,
+        schedules: true,
       },
     });
 
-    res.json({ success: true, section });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to create section.' });
+    return res.json({ success: true, section });
+  } catch (err: any) {
+    console.error('POST /api/sections error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to create section' });
   }
 });
 
-app.put('/api/teacher/students/:studentId/assign-section', authenticateToken, async (req: any, res: any) => {
+app.delete('/api/sections/:id', verifyToken, async (req, res) => {
   try {
-    const { sectionId } = req.body;
-    const student = await prisma.student.update({
-      where: { id: req.params.studentId },
-      data: { sectionId: sectionId || null },
-      include: { section: true, subject: true },
+    const sectionId = String(req.params.id);
+    await prisma.sectionSchedule.deleteMany({ where: { sectionId } });
+    await prisma.student.updateMany({
+      where: { sectionId },
+      data: { sectionId: null },
     });
-    res.json({ success: true, student });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to assign student to section.' });
+    await prisma.section.delete({ where: { id: sectionId } });
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('DELETE /api/sections/:id error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to delete section' });
   }
 });
 
-app.delete('/api/sections/:id', authenticateToken, async (req: any, res: any) => {
+app.put('/api/sections/:id/toggle-verification', verifyToken, async (req, res) => {
   try {
-    await prisma.section.delete({ where: { id: req.params.id } });
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to delete section.' });
-  }
-});
+    const sectionId = String(req.params.id);
+    const requireTeacherApproval = Boolean(req.body?.requireTeacherApproval);
 
-app.put('/api/sections/:id/toggle-verification', authenticateToken, async (req: any, res: any) => {
-  try {
-    const { requireTeacherApproval } = req.body;
-    await prisma.section.update({
-      where: { id: req.params.id },
-      data: { requireTeacherApproval: Boolean(requireTeacherApproval) },
+    const updated = await prisma.section.update({
+      where: { id: sectionId },
+      data: { requireTeacherApproval },
     });
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to update approval toggle.' });
+
+    return res.json({ success: true, section: updated });
+  } catch (err: any) {
+    console.error('PUT /api/sections/:id/toggle-verification error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to toggle approval' });
   }
 });
 
-app.post('/api/sections/:id/schedules', authenticateToken, async (req: any, res: any) => {
+app.post('/api/sections/:id/schedules', verifyToken, async (req, res) => {
   try {
-    const { date, room, startTime, absentCutoffTime, endTime } = req.body;
+    const sectionId = String(req.params.id);
+    const date = String(req.body?.date || new Date().toISOString().split('T')[0]).trim();
+    const room = String(req.body?.room || '').trim();
+    const startTime = String(req.body?.startTime || '08:00').trim();
+    const absentCutoffTime = String(req.body?.absentCutoffTime || '08:30').trim();
+    const endTime = String(req.body?.endTime || '17:00').trim();
+
     const schedule = await prisma.sectionSchedule.create({
       data: {
-        sectionId: req.params.id,
+        sectionId,
         date,
         room,
         startTime,
@@ -479,47 +819,88 @@ app.post('/api/sections/:id/schedules', authenticateToken, async (req: any, res:
         endTime,
       },
     });
-    await prisma.section.update({
-      where: { id: req.params.id },
-      data: { room, startTime, absentCutoffTime, endTime },
+
+    return res.json({ success: true, schedule });
+  } catch (err: any) {
+    console.error('POST /api/sections/:id/schedules error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to add schedule' });
+  }
+});
+
+app.delete('/api/schedules/:id', verifyToken, async (req, res) => {
+  try {
+    const scheduleId = String(req.params.id);
+    await prisma.sectionSchedule.delete({ where: { id: scheduleId } });
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('DELETE /api/schedules/:id error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to delete schedule' });
+  }
+});
+
+app.put('/api/teacher/students/:studentId/assign-section', verifyToken, async (req, res) => {
+  try {
+    const studentId = String(req.params.studentId);
+    const sectionId = req.body?.sectionId ? String(req.body.sectionId).trim() : null;
+
+    let inheritedSubjectId: string | undefined;
+    if (sectionId) {
+      const sec = await prisma.section.findUnique({ where: { id: sectionId } });
+      if (sec?.subjectId) {
+        inheritedSubjectId = sec.subjectId;
+      }
+    }
+
+    const updated = await prisma.student.update({
+      where: { id: studentId },
+      data: {
+        sectionId,
+        ...(inheritedSubjectId ? { subjectId: inheritedSubjectId } : {}),
+      },
+      include: {
+        subject: { include: { teacher: true } },
+        section: true,
+      },
     });
-    res.json({ success: true, schedule });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to add schedule log.' });
+
+    return res.json({ success: true, student: updated });
+  } catch (err: any) {
+    console.error('PUT /api/teacher/students/:studentId/assign-section error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to assign section' });
   }
 });
 
-app.delete('/api/schedules/:id', authenticateToken, async (req: any, res: any) => {
+app.post('/api/teacher/approve-attendance', verifyToken, async (req, res) => {
   try {
-    await prisma.sectionSchedule.delete({ where: { id: req.params.id } });
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to delete schedule log.' });
-  }
-});
+    const recordId = String(req.body?.recordId || '').trim();
+    const status = String(req.body?.status || 'Present').trim();
 
-// Teacher Approves or Updates Student Attendance Status
-app.post('/api/teacher/approve-attendance', authenticateToken, async (req: any, res: any) => {
-  try {
-    const { recordId, status } = req.body;
-    await prisma.attendanceRecord.update({
+    if (!recordId) {
+      return res.status(400).json({ success: false, error: 'Record ID is required' });
+    }
+
+    const updated = await prisma.attendanceRecord.update({
       where: { id: recordId },
       data: { status },
     });
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to update attendance status.' });
+
+    return res.json({ success: true, record: updated });
+  } catch (err: any) {
+    console.error('POST /api/teacher/approve-attendance error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to update attendance' });
   }
 });
 
-// Generate Real-Time Attendance QR Code Session
-app.post('/api/attendance/qr-session', authenticateToken, async (req: any, res: any) => {
+app.post('/api/attendance/qr-session', verifyToken, async (req, res) => {
   try {
-    const { sectionId, type } = req.body;
-    if (!sectionId) return res.status(400).json({ success: false, error: 'Section ID is required.' });
+    const sectionId = String(req.body?.sectionId || '').trim();
+    const type = String(req.body?.type || 'In').trim();
 
-    const token = `${sectionId}_${type}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    if (!sectionId) {
+      return res.status(400).json({ success: false, error: 'Section is required' });
+    }
 
+    const token = `qr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     await prisma.qRSession.create({
       data: {
         sectionId,
@@ -528,142 +909,191 @@ app.post('/api/attendance/qr-session', authenticateToken, async (req: any, res: 
       },
     });
 
-    const qrPayload = JSON.stringify({ sectionId, type, token });
-    const qrImageUrl = await QRCode.toDataURL(qrPayload, { width: 300, margin: 2 });
+    const payload = JSON.stringify({
+      sectionId,
+      type,
+      token,
+      issuedAt: Date.now(),
+    });
 
-    res.json({ success: true, qrImageUrl, token });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to generate QR session.' });
+    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(payload)}`;
+    return res.json({ success: true, qrImageUrl, payload, token });
+  } catch (err: any) {
+    console.error('POST /api/attendance/qr-session error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to generate QR session' });
   }
 });
 
-// ================= STUDENT PORTAL ENDPOINTS =================
+// ==========================================
+// STUDENT ROUTES
+// ==========================================
 
-app.get('/api/state/student', authenticateToken, async (req: any, res: any) => {
+app.get('/api/state/student', verifyToken, async (req: any, res) => {
   try {
-    const studentId = req.user.id;
+    const studentId = String(req.user?.id || '');
     const student = await prisma.student.findUnique({
       where: { id: studentId },
       include: {
         subject: { include: { teacher: true } },
-        section: { include: { teacher: true, schedules: true } },
-        records: { orderBy: { createdAt: 'desc' } },
+        section: {
+          include: {
+            teacher: true,
+            schedules: true,
+          },
+        },
       },
     });
 
-    if (!student) return res.status(404).json({ success: false, error: 'Student not found.' });
+    if (!student) {
+      return res.status(404).json({ success: false, error: 'Student not found' });
+    }
 
-    res.json({ success: true, student, records: student.records });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to load student state.' });
+    const [subjects, sections, records] = await Promise.all([
+      prisma.subject.findMany({ include: { teacher: true }, orderBy: { createdAt: 'desc' } }),
+      prisma.section.findMany({ include: { teacher: true }, orderBy: { createdAt: 'desc' } }),
+      prisma.attendanceRecord.findMany({
+        where: { studentId },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+
+    return res.json({
+      success: true,
+      student,
+      subjects,
+      sections,
+      records,
+    });
+  } catch (err) {
+    console.error('GET /api/state/student error:', err);
+    return res.status(500).json({ success: false, error: 'Failed to load student state' });
   }
 });
 
-// Student Scans QR Code with Facial Verification Photo
-app.post('/api/attendance/scan', authenticateToken, async (req: any, res: any) => {
+app.post('/api/student/change-password', verifyToken, async (req: any, res) => {
   try {
-    const studentId = req.user.id;
-    const { qrData, photoUrl } = req.body;
+    const studentId = String(req.user?.id || req.body?.studentId || '').trim();
+    const currentPassword = String(req.body?.currentPassword || '').trim();
+    const newPassword = String(req.body?.newPassword || '').trim();
 
-    let parsed: { sectionId: string; type: string; token: string };
-    try {
-      parsed = typeof qrData === 'string' ? JSON.parse(qrData) : qrData;
-    } catch {
-      return res.status(400).json({ success: false, error: 'Invalid QR code format.' });
-    }
-
-    const session = await prisma.qRSession.findUnique({
-      where: { token: parsed.token },
-      include: { section: true },
-    });
-
-    if (!session) {
-      return res.status(404).json({ success: false, error: 'Invalid or expired QR session.' });
-    }
-
-    const student = await prisma.student.findUnique({ where: { id: studentId } });
-    if (!student || student.sectionId !== session.sectionId) {
-      return res.status(403).json({
+    if (!studentId || !currentPassword || newPassword.length < 4) {
+      return res.status(400).json({
         success: false,
-        error: 'You are not assigned to this section yet. Ask your teacher to assign your section.',
+        error: 'Current password and a new password (at least 4 characters) are required',
       });
     }
 
-    const now = new Date();
-    const dateStr = now.toISOString().split('T')[0];
-    const timeStr = now.toTimeString().slice(0, 5);
-
-    // If student has not passed face verification yet, mark initial status as pending face verification
-    let status = student.isVerified ? 'Present' : '⚠️ Pending Face Verification';
-    if (student.isVerified) {
-      if (
-        session.type === 'In' &&
-        session.section.absentCutoffTime &&
-        timeStr > session.section.absentCutoffTime
-      ) {
-        status = 'Late';
-      }
+    const student = await prisma.student.findUnique({ where: { id: studentId } });
+    if (!student) {
+      return res.status(404).json({ success: false, error: 'Student not found' });
     }
 
-    const record = await prisma.attendanceRecord.create({
+    const isCurrentValid =
+      (student.passwordHash &&
+        (await bcrypt.compare(currentPassword, student.passwordHash).catch(() => false))) ||
+      currentPassword === student.passwordHash ||
+      currentPassword === student.id;
+
+    if (!isCurrentValid) {
+      return res.status(401).json({ success: false, error: 'Current password is incorrect' });
+    }
+
+    const newPasswordHash = await bcrypt.hash(newPassword, 10);
+    await prisma.student.update({
+      where: { id: student.id },
+      data: { passwordHash: newPasswordHash },
+    });
+
+    return res.json({ success: true, message: 'Password updated successfully' });
+  } catch (err: any) {
+    console.error('POST /api/student/change-password error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to change password' });
+  }
+});
+
+app.post('/api/student/verify-attendance', async (req, res) => {
+  try {
+    const studentId = String(req.body?.studentId || '').trim();
+    const capturedPhoto = typeof req.body?.capturedPhoto === 'string' ? req.body.capturedPhoto : '';
+
+    if (!studentId) {
+      return res.status(400).json({ success: false, error: 'Student ID is required' });
+    }
+
+    const updated = await prisma.student.update({
+      where: { id: studentId },
       data: {
-        studentId,
-        sectionId: session.sectionId,
-        type: session.type,
-        status,
-        date: dateStr,
-        time: timeStr,
-        photoUrl: photoUrl || student.photoUrl || null,
+        isVerified: true,
+        ...(capturedPhoto ? { photoUrl: capturedPhoto, biometricPhoto: capturedPhoto } : {}),
+      },
+      include: {
+        subject: { include: { teacher: true } },
+        section: true,
       },
     });
 
-    res.json({ success: true, record, status });
-  } catch (error) {
-    console.error('Error recording attendance scan:', error);
-    res.status(500).json({ success: false, error: 'Failed to record attendance.' });
+    return res.json({ success: true, student: updated });
+  } catch (err: any) {
+    console.error('POST /api/student/verify-attendance error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Verification failed' });
   }
 });
 
-app.put('/api/student/change-password', authenticateToken, async (req: any, res: any) => {
+app.post('/api/student/forgot-password-face', async (req, res) => {
   try {
-    const { newPassword } = req.body;
-    if (!newPassword || newPassword.trim().length < 4) {
-      return res.status(400).json({ success: false, error: 'Password must be at least 4 characters.' });
+    const identifier = String(req.body?.username || req.body?.id || '').trim();
+    const newPassword = String(req.body?.newPassword || '').trim();
+    const capturedPhoto = typeof req.body?.capturedPhoto === 'string' ? req.body.capturedPhoto : '';
+
+    if (!identifier || newPassword.length < 4) {
+      return res.status(400).json({ success: false, error: 'Valid student identifier and password are required' });
     }
 
-    await prisma.student.update({
-      where: { id: req.user.id },
-      data: { passwordHash: newPassword.trim() },
+    const student = await prisma.student.findFirst({
+      where: {
+        OR: [
+          { id: identifier },
+          { username: { equals: identifier, mode: 'insensitive' } },
+          { name: { equals: identifier, mode: 'insensitive' } },
+        ],
+      },
     });
 
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ success: false, error: 'Failed to update password.' });
+    if (!student) {
+      return res.status(404).json({ success: false, error: 'Student account not found' });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await prisma.student.update({
+      where: { id: student.id },
+      data: {
+        passwordHash,
+        isVerified: true,
+        ...(capturedPhoto ? { photoUrl: capturedPhoto, biometricPhoto: capturedPhoto } : {}),
+      },
+    });
+
+    return res.json({ success: true, message: 'Password updated successfully' });
+  } catch (err: any) {
+    console.error('POST /api/student/forgot-password-face error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to reset password' });
   }
 });
 
-// ================= FRONTEND STATIC FILES & SPA FALLBACK =================
+// ==========================================
+// STATIC FRONTEND SERVING (PRODUCTION)
+// ==========================================
 
-// Resolve the built frontend directory (supports running from project root or dist/server.cjs)
-const distDir = fs.existsSync(path.resolve(process.cwd(), 'dist', 'index.html'))
-  ? path.resolve(process.cwd(), 'dist')
-  : path.resolve(__dirname, '..', 'dist');
+const distDir = path.resolve(process.cwd(), 'dist');
+app.use(express.static(distDir));
 
-// Serve static Vite assets when the production build exists
-if (fs.existsSync(path.join(distDir, 'index.html'))) {
-  app.use(express.static(distDir));
+app.get('*', (req, res) => {
+  if (req.path.startsWith('/api')) {
+    return res.status(404).json({ success: false, error: 'API route not found' });
+  }
+  return res.sendFile(path.join(distDir, 'index.html'));
+});
 
-  // Fallback to index.html for non-API routes so React handles routing cleanly
-  app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api')) return next();
-    res.sendFile(path.join(distDir, 'index.html'));
-  });
-}
-
-// ================= START SERVER =================
-
-const PORT = process.env.PORT || 5001;
-app.listen(PORT, async () => {
-  await seedAdmin();
-  console.log(`Edulectrical Server running smoothly with verification rules on port ${PORT}`);
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
 });
