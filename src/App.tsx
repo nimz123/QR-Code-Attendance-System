@@ -10,7 +10,6 @@ import { apiFetch } from './lib/api';
 import {
   Sun,
   Moon,
-  School,
   Lock,
   Unlock,
   User,
@@ -84,8 +83,8 @@ function DarkModeToggle() {
 
 export default function App() {
   const [sections, setSections] = useState<Section[]>([]);
-  const [teacherSections, setTeacherSections] = useState<Section[]>([]);
-  const [teacherRecords, setTeacherRecords] = useState<AttendanceRecord[]>([]);
+  const [, setTeacherSections] = useState<Section[]>([]);
+  const [, setTeacherRecords] = useState<AttendanceRecord[]>([]);
 
   const [authUser, setAuthUser] = useState<AuthUser | null>(() => {
     try {
@@ -122,8 +121,10 @@ export default function App() {
     try {
       const { ok, data } = await apiFetch('/api/state/public');
 
-      if (ok && data.success) {
-        setSections(data.sections);
+      if (ok && data?.success) {
+        setSections(Array.isArray(data.sections) ? data.sections : []);
+      } else {
+        setSections([]);
       }
     } catch (error) {
       console.error('Failed to load public state:', error);
@@ -134,9 +135,9 @@ export default function App() {
     try {
       const { ok, data } = await apiFetch('/api/state/teacher');
 
-      if (ok && data.success) {
-        setTeacherSections(data.sections);
-        setTeacherRecords(data.records);
+      if (ok && data?.success) {
+        setTeacherSections(Array.isArray(data.sections) ? data.sections : []);
+        setTeacherRecords(Array.isArray(data.records) ? data.records : []);
 
         if (data.teacher) {
           setAuthUser((prev) => {
@@ -165,7 +166,7 @@ export default function App() {
 
         const { ok, data } = await apiFetch('/api/auth/me');
 
-        if (!active || !ok || !data.success || !data.user) {
+        if (!active || !ok || !data?.success || !data?.user) {
           return;
         }
 
@@ -240,161 +241,6 @@ export default function App() {
     }
   };
 
-  const handleAddSection = async (name: string, startTime: string) => {
-    try {
-      const { ok, data } = await apiFetch('/api/sections', {
-        method: 'POST',
-        body: JSON.stringify({ name, startTime }),
-      });
-
-      if (ok) {
-        setTeacherSections((prev) => [...prev, data.section]);
-      } else {
-        alert(data.error || 'Failed to create section.');
-      }
-    } catch (error) {
-      console.error('Add section error:', error);
-      alert('Unable to create section. Please try again.');
-    }
-  };
-
-  const handleDeleteSection = async (id: string) => {
-    try {
-      const { ok, data } = await apiFetch(`/api/sections/${id}`, {
-        method: 'DELETE',
-      });
-
-      if (!ok) {
-        alert(data.error || 'Failed to delete section.');
-        return;
-      }
-
-      setTeacherSections((prev) => prev.filter((s) => s.id !== id));
-      setTeacherRecords((prev) =>
-        prev.filter((record) => record.sectionId !== id)
-      );
-    } catch (error) {
-      console.error('Delete section error:', error);
-      alert('Unable to delete section.');
-    }
-  };
-
-  const handleUpdateSectionTime = async (
-    sectionId: string,
-    startTime: string
-  ) => {
-    try {
-      const { ok, data } = await apiFetch(`/api/sections/${sectionId}`, {
-        method: 'PUT',
-        body: JSON.stringify({ startTime }),
-      });
-
-      if (ok) {
-        setTeacherSections((prev) =>
-          prev.map((section) =>
-            section.id === sectionId ? data.section : section
-          )
-        );
-      } else {
-        alert(data.error || 'Failed to update section time.');
-      }
-    } catch (error) {
-      console.error('Update section time error:', error);
-      alert('Unable to update section time.');
-    }
-  };
-
-  const handleDeleteStudent = async (
-    sectionId: string,
-    studentId: string
-  ) => {
-    try {
-      const { ok, data } = await apiFetch(`/api/students/${studentId}`, {
-        method: 'DELETE',
-      });
-
-      if (!ok) {
-        alert(data.error || 'Failed to delete student.');
-        return;
-      }
-
-      setTeacherSections((prev) =>
-        prev.map((section) =>
-          section.id === sectionId
-            ? {
-                ...section,
-                students: section.students.filter(
-                  (student) => student.id !== studentId
-                ),
-              }
-            : section
-        )
-      );
-    } catch (error) {
-      console.error('Delete student error:', error);
-      alert('Unable to delete student.');
-    }
-  };
-
-  const handleUpdateStudentPhoto = async (
-    sectionId: string,
-    studentId: string,
-    photoUrl: string
-  ) => {
-    try {
-      const { ok, data } = await apiFetch('/api/student/photo', {
-        method: 'POST',
-        body: JSON.stringify({ studentId, photoUrl }),
-      });
-
-      if (!ok) {
-        alert(data.error || 'Failed to update student photo.');
-        return;
-      }
-
-      const patch = (list: Section[]) =>
-        list.map((section) =>
-          section.id === sectionId
-            ? {
-                ...section,
-                students: section.students.map((student) =>
-                  student.id === studentId
-                    ? { ...student, photoUrl }
-                    : student
-                ),
-              }
-            : section
-        );
-
-      setSections(patch);
-      setTeacherSections(patch);
-    } catch (error) {
-      console.error('Update student photo error:', error);
-      alert('Unable to update student photo.');
-    }
-  };
-
-  const handleClearRecords = async () => {
-    if (!window.confirm('Are you sure you want to clear all attendance records?')) {
-      return;
-    }
-
-    try {
-      const { ok, data } = await apiFetch('/api/records/clear', {
-        method: 'POST',
-      });
-
-      if (ok) {
-        setTeacherRecords([]);
-      } else {
-        alert(data.error || 'Failed to clear attendance records.');
-      }
-    } catch (error) {
-      console.error('Clear records error:', error);
-      alert('Unable to clear attendance records.');
-    }
-  };
-
   const handleSubmitAttendance = async (
     studentId: string,
     studentName: string,
@@ -446,7 +292,7 @@ export default function App() {
       if (!ok) {
         console.error(
           'Attendance was not saved:',
-          data.error || 'Unknown error'
+          data?.error || 'Unknown error'
         );
       }
     } catch (error) {
@@ -494,13 +340,12 @@ export default function App() {
         }),
       });
 
-      if (!ok || !data.success) {
-        alert(data.error || 'Failed to save security settings.');
+      if (!ok || !data?.success) {
+        alert(data?.error || 'Failed to save security settings.');
         return;
       }
 
-      const savedUsername =
-        data.teacher?.username || trimmedUsername;
+      const savedUsername = data.teacher?.username || trimmedUsername;
 
       setAuthUser((prev) => {
         if (!prev || prev.role !== 'teacher') return prev;
@@ -530,7 +375,10 @@ export default function App() {
 
   const isTeacher = authUser?.role === 'teacher';
   const isStudent = authUser?.role === 'student';
-  const isPublicView = currentView === 'checkin' || currentView === 'login' || currentView === 'about';
+  const isPublicView =
+    currentView === 'checkin' ||
+    currentView === 'login' ||
+    currentView === 'about';
 
   return (
     <div
@@ -557,15 +405,14 @@ export default function App() {
         }`}
       >
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3">
-          
           {/* TOP ROW FOR MOBILE: LOGO & CLOCK */}
           <div className="w-full md:w-auto flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
               <div className="bg-white/10 p-1 rounded-xl border border-gray-200 dark:border-gray-700 flex items-center justify-center shrink-0">
-                <img 
-                  src="/Ctulogo.jpg" 
-                  alt="CTU Logo" 
-                  className="w-8 h-8 sm:w-10 sm:h-10 object-contain rounded-lg" 
+                <img
+                  src="/Ctulogo.jpg"
+                  alt="CTU Logo"
+                  className="w-8 h-8 sm:w-10 sm:h-10 object-contain rounded-lg"
                 />
               </div>
 
@@ -588,7 +435,10 @@ export default function App() {
               id="live-clock-widget-mobile"
               className="flex md:hidden items-center gap-1.5 bg-gray-50/90 dark:bg-gray-800/90 border border-gray-200 dark:border-gray-700 rounded-xl px-2.5 py-1 text-[11px] text-gray-600 dark:text-gray-300 font-mono font-medium shadow-xs"
             >
-              <Clock size={12} className="text-indigo-600 dark:text-indigo-400 animate-pulse shrink-0" />
+              <Clock
+                size={12}
+                className="text-indigo-600 dark:text-indigo-400 animate-pulse shrink-0"
+              />
               <strong className="text-gray-900 dark:text-gray-100 font-bold">
                 {currentTime.toLocaleTimeString([], {
                   hour: '2-digit',
@@ -604,7 +454,10 @@ export default function App() {
             id="live-clock-widget-desktop"
             className="hidden md:flex items-center gap-2 bg-gray-50/90 dark:bg-gray-800/90 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-1 text-xs text-gray-600 dark:text-gray-300 font-mono font-medium shadow-xs"
           >
-            <Clock size={14} className="text-indigo-600 dark:text-indigo-400 animate-pulse shrink-0" />
+            <Clock
+              size={14}
+              className="text-indigo-600 dark:text-indigo-400 animate-pulse shrink-0"
+            />
             <span>Time:</span>
             <strong className="text-gray-900 dark:text-gray-100 font-bold">
               {currentTime.toLocaleTimeString([], {
@@ -617,7 +470,6 @@ export default function App() {
 
           {/* NAVIGATION BUTTONS & ACTIONS */}
           <div className="w-full md:w-auto flex items-center justify-center sm:justify-end gap-2 flex-wrap">
-            {/* ABOUT US BUTTON - NAKITA NA ANG WORD NGA ABOUT US */}
             <button
               type="button"
               onClick={() => setCurrentView('about')}
@@ -675,7 +527,6 @@ export default function App() {
               </button>
             </div>
           </div>
-
         </div>
       </header>
 
@@ -696,9 +547,26 @@ export default function App() {
               <StudentPortal
                 sections={sections}
                 preselectedSectionId={preselectedSectionId}
-                onSubmitAttendance={handleSubmitAttendance}
-                onUpdateStudentPhoto={handleUpdateStudentPhoto}
-                onGoToLogin={() => setCurrentView('login')}
+                onSubmitAttendance={async (
+                  studentId,
+                  studentName,
+                  sectionId,
+                  type
+                ) => {
+                  const now = new Date();
+                  const dateStr = now.toISOString().split('T')[0];
+                  const timeStr = now.toTimeString().slice(0, 5);
+                  const sec = sections.find((s) => s.id === sectionId);
+                  return handleSubmitAttendance(
+                    studentId,
+                    studentName,
+                    sectionId,
+                    sec?.name || '',
+                    dateStr,
+                    timeStr,
+                    type
+                  );
+                }}
               />
             </motion.div>
           )}
@@ -784,20 +652,7 @@ export default function App() {
               </div>
 
               <TeacherDashboard
-                teacher={{
-                  name: authUser.name,
-                  username: authUser.username,
-                  photo: authUser.photo || undefined,
-                  role: authUser.role,
-                }}
-                sections={teacherSections}
-                records={teacherRecords}
-                onAddSection={handleAddSection}
-                onDeleteSection={handleDeleteSection}
-                onDeleteStudent={handleDeleteStudent}
-                onUpdateSectionTime={handleUpdateSectionTime}
-                onClearRecords={handleClearRecords}
-                onUpdateStudentPhoto={handleUpdateStudentPhoto}
+                token={localStorage.getItem('token') || undefined}
                 onLogOut={handleLogOut}
               />
             </motion.div>

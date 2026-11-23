@@ -70,9 +70,9 @@ export function saveTeacherPhotoGlobal(profile: any, photoUrl: string): string {
   const clean = cleanPhotoUrl(photoUrl) || readTeacherPhotoGlobal(profile);
   if (!clean) return "";
 
-  const idKey = String(profile?.id || "lorenzo").trim().toLowerCase();
-  const emailKey = String(profile?.email || "lorenzo@edu.com").trim().toLowerCase();
-  const nameKey = String(profile?.name || profile?.username || "lorenzo birao")
+  const idKey = String(profile?.id || "").trim().toLowerCase();
+  const emailKey = String(profile?.email || "").trim().toLowerCase();
+  const nameKey = String(profile?.name || profile?.username || "")
     .replace(/^Teacher\s+/i, "")
     .trim()
     .toLowerCase();
@@ -165,9 +165,9 @@ export function readTeacherPhotoGlobal(teacher?: any): string {
     targetId ? `teacher_photo_${targetId}` : "",
     targetEmail ? `teacher_photo_${targetEmail}` : "",
     targetName ? `teacher_photo_${targetName}` : "",
-    "teacher_photo_lorenzo",
-    "teacher_photo_lorenzo@edu.com",
-    "teacher_photo_lorenzo birao",
+    "teacher_photo",
+    "teacher_photo",
+    "teacher_photo",
     "teacher_photo_latest"
   ]) {
     if (!k) continue;
@@ -196,7 +196,7 @@ export function readTeacherPhotoGlobal(teacher?: any): string {
           (targetId && cId && targetId === cId) ||
           (targetEmail && cEmail && targetEmail === cEmail) ||
           (targetName && cName && (targetName === cName || cName.includes(targetName) || targetName.includes(cName))) ||
-          (!teacher && (c?.role === "teacher" || cName.includes("lorenzo")));
+          (!teacher && (c?.role === "teacher" || cName.includes("")));
 
         if (match) {
           const p = cleanPhotoUrl(c?.photoUrl || c?.avatar || c?.photo);

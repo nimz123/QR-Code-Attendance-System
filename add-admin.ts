@@ -11,8 +11,7 @@ const prisma = new PrismaClient({
 
 async function run() {
   const hashedPassword = await bcrypt.hash('changeme123', 10);
-  
-  // Gigamit namo ang 'Teacher' model kay mao nay naa sa imong schema.prisma para sa admin/teachers
+
   const admin = await prisma.teacher.upsert({
     where: { username: 'admin' },
     update: { passwordHash: hashedPassword },
@@ -20,10 +19,9 @@ async function run() {
       name: 'System Administrator',
       username: 'admin',
       passwordHash: hashedPassword,
-      subject: 'Administration',
     },
   });
-  
+
   console.log('✅ Admin (Teacher model) account ready:', admin.username);
 }
 

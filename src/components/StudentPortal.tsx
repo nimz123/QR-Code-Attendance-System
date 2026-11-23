@@ -143,7 +143,6 @@ export default function StudentPortal({
         ) {
           return true;
         }
-        if (!teacher && (obj?.role === "teacher" || oName.includes("lorenzo"))) return true;
         return false;
       };
 
@@ -194,40 +193,25 @@ export default function StudentPortal({
             return [];
           })();
 
-    if (baseList.length > 0) {
-      return baseList.map((t: any, idx: number) => {
-        const cleanName =
-          String(t?.name || t?.username || "Lorenzo Birao")
-            .replace(/^Teacher\s+/i, "")
-            .trim() || "Lorenzo Birao";
-        const email =
-          t?.email ||
-          (t?.username ? `${String(t.username).replace("@", "")}@edu.com` : "Lorenzo@edu.com");
-        const photo = getPhotoFromUserAndLists({ ...t, name: cleanName, email });
-        return {
-          id: String(t?.id || t?.username || email || `teacher_${idx}`),
-          name: cleanName,
-          email,
-          photoUrl: photo,
-          avatar: photo
-        };
-      });
-    }
+    if (baseList.length === 0) return [];
 
-    const fallbackTeacher = {
-      id: "lorenzo",
-      name: "Lorenzo Birao",
-      email: "Lorenzo@edu.com"
-    };
-    const fallbackPhoto = getPhotoFromUserAndLists(fallbackTeacher);
-
-    return [
-      {
-        ...fallbackTeacher,
-        photoUrl: fallbackPhoto,
-        avatar: fallbackPhoto
-      }
-    ];
+    return baseList.map((t: any, idx: number) => {
+      const cleanName =
+        String(t?.name || t?.username || "")
+          .replace(/^Teacher\s+/i, "")
+          .trim() || "";
+      const email =
+        t?.email ||
+        (t?.username ? `${String(t.username).replace("@", "")}@edu.com` : "");
+      const photo = getPhotoFromUserAndLists({ ...t, name: cleanName, email });
+      return {
+        id: String(t?.id || t?.username || email || `teacher_${idx}`),
+        name: cleanName,
+        email,
+        photoUrl: photo,
+        avatar: photo
+      };
+    });
   };
 
   const [teachers, setTeachers] = useState<any[]>(() => buildTeachers());
@@ -238,10 +222,7 @@ export default function StudentPortal({
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>("");
   const [teacherSubjects, setTeacherSubjects] = useState<any[]>([]);
 
-  const [enrolledStudents, setEnrolledStudents] = useState<any[]>([
-    { id: "121212", name: "KIRBY BACASMAS", password: "121212", isFaceVerified: false, sectionAssign: "A-1" },
-    { id: "16216", name: "JOHN", password: "16216", isFaceVerified: false, sectionAssign: "A-1" }
-  ]);
+  const [enrolledStudents, setEnrolledStudents] = useState<any[]>([]);
 
   const [selectedStudentId, setSelectedStudentId] = useState<string>("");
   const [studentPassword, setStudentPassword] = useState<string>("");
@@ -322,51 +303,93 @@ export default function StudentPortal({
   }, [propTeachers]);
 
   useEffect(() => {
-    let combinedSections: any[] = [];
+    const combinedSections: any[] = Array.isArray(sections) ? [...sections] : [];
+    setTeacherSections(combinedSections);
 
-    if (Array.isArray(sections) && sections.length > 0) {
-      combinedSections = [...sections];
+    const extractedStudents: any[] = [];
+    const extractedSubjects: any[] = [];
+    const extractedTeachers: any[] = [];
+    const seenStudentIds = new Set<string>();
+    const seenSubjectIds = new Set<string>();
+    const seenTeacherIds = new Set<string>();
+
+    for (const sec of combinedSections) {
+      const secAny = sec as any;
+
+      if (secAny?.teacher && typeof secAny.teacher === "object") {
+        const tObj = secAny.teacher;
+        const tId = String(tObj?.id || tObj?.username || tObj?.email || tObj?.name || "").trim();
+        if (tId && !seenTeacherIds.has(tId.toLowerCase())) {
+          seenTeacherIds.add(tId.toLowerCase());
+          const cleanName = String(tObj?.name || tObj?.username || "")
+            .replace(/^Teacher\s+/i, "")
+            .trim();
+          const email =
+            tObj?.email ||
+            (tObj?.username ? `${String(tObj.username).replace("@", "")}@edu.com` : "");
+          const photo = cleanPhotoSrc(tObj?.photoUrl || tObj?.avatar || "");
+          extractedTeachers.push({
+            id: tId,
+            name: cleanName,
+            email,
+            photoUrl: photo,
+            avatar: photo,
+          });
+        }
+      }
+
+      if (Array.isArray(secAny?.students)) {
+        for (const st of secAny.students) {
+          const stId = String(st?.id || "").trim();
+          if (stId && !seenStudentIds.has(stId)) {
+            seenStudentIds.add(stId);
+            const updatedPass = localStorage.getItem(`student_pass_${stId}`) || st?.password || "";
+            extractedStudents.push({
+              ...st,
+              password: updatedPass,
+              sectionAssign: st?.sectionAssign || sec?.id || "",
+            });
+          }
+        }
+      }
+
+      if (Array.isArray(secAny?.subjects)) {
+        for (const sub of secAny.subjects) {
+          const subId = String(sub?.id || sub?.name || "").trim();
+          if (subId && !seenSubjectIds.has(subId)) {
+            seenSubjectIds.add(subId);
+            extractedSubjects.push({
+              id: String(sub?.id || sub?.name),
+              name: String(sub?.name || sub?.id),
+            });
+          }
+        }
+      } else if (secAny?.subject && typeof secAny.subject === "string") {
+        const subName = secAny.subject.trim();
+        if (subName && !seenSubjectIds.has(subName)) {
+          seenSubjectIds.add(subName);
+          extractedSubjects.push({ id: subName, name: subName });
+        }
+      }
     }
 
-    try {
-      const localSections = JSON.parse(
-        localStorage.getItem("teacher_sections") || localStorage.getItem("sections") || "[]"
-      );
-      if (Array.isArray(localSections) && localSections.length > 0) {
-        combinedSections = [...localSections, ...combinedSections];
-      }
-    } catch {}
-
-    if (!combinedSections.some((s: any) => s.name?.includes("A-1"))) {
-      combinedSections.unshift({
-        id: "section_a1",
-        name: "A-1",
-        subject: "PE",
-        room: "ROOM 121"
+    if (extractedTeachers.length > 0) {
+      setTeachers((prev) => {
+        const merged = [...extractedTeachers];
+        for (const p of prev) {
+          const key = String(p?.id || p?.email || p?.name || "").trim().toLowerCase();
+          if (key && !seenTeacherIds.has(key)) {
+            seenTeacherIds.add(key);
+            merged.push(p);
+          }
+        }
+        return merged;
       });
     }
 
-    setTeacherSections(combinedSections);
-    setTeacherSubjects([
-      { id: "sub_pe", name: "PE" }
-    ]);
+    setEnrolledStudents(extractedStudents);
+    setTeacherSubjects(extractedSubjects);
   }, [sections]);
-
-  useEffect(() => {
-    try {
-      const localStudents = JSON.parse(localStorage.getItem("admin_enrolled_students") || "[]");
-      if (Array.isArray(localStudents) && localStudents.length > 0) {
-        const updatedList = localStudents.map((s: any) => {
-          const updatedPass = localStorage.getItem(`student_pass_${s.id}`) || s.password || s.id;
-          return {
-            ...s,
-            password: updatedPass
-          };
-        });
-        setEnrolledStudents(updatedList);
-      }
-    } catch {}
-  }, []);
 
   const activeTeacher = selectedTeacherId
     ? teachers.find(
@@ -457,6 +480,10 @@ export default function StudentPortal({
     e.preventDefault();
     setError("");
 
+    if (!selectedStudentObj?.id) {
+      setError("Please select a student first.");
+      return;
+    }
     if (!forgotPhoto) {
       setError("Please capture your face photo using the camera.");
       return;
@@ -471,23 +498,12 @@ export default function StudentPortal({
     }
 
     try {
-      const targetId = selectedStudentObj?.id || "121212";
+      const targetId = selectedStudentObj.id;
       localStorage.setItem(`student_pass_${targetId}`, newPassword.trim());
 
       setEnrolledStudents((prev) =>
         prev.map((s) => (s.id === targetId ? { ...s, password: newPassword.trim() } : s))
       );
-
-      const enrolledRaw = localStorage.getItem("admin_enrolled_students");
-      if (enrolledRaw) {
-        const parsedStudents = JSON.parse(enrolledRaw);
-        if (Array.isArray(parsedStudents)) {
-          const updatedStudents = parsedStudents.map((s: any) =>
-            s.id === targetId ? { ...s, password: newPassword.trim() } : s
-          );
-          localStorage.setItem("admin_enrolled_students", JSON.stringify(updatedStudents));
-        }
-      }
 
       setForgotStep("done");
       setSuccessMsg("Password changed successfully!");
@@ -625,9 +641,7 @@ export default function StudentPortal({
 
       if (
         studentPassword !== validPassword &&
-        studentPassword !== studentId &&
-        studentPassword !== "121212" &&
-        studentPassword !== "16216"
+        studentPassword !== studentId
       ) {
         setPasswordError("Invalid password!");
         triggerPasswordShake();
