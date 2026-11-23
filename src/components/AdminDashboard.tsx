@@ -17,6 +17,7 @@ import {
   clearTeacherResetRequests,
   TeacherResetRequest,
 } from './portalFeatures';
+
 interface TeacherAccount {
   id: string;
   name?: string;
@@ -86,12 +87,20 @@ type InspectedProfile =
 const DELETED_TEACHERS_KEY = "deleted_teacher_registry";
 const DELETED_STUDENTS_KEY = "deleted_student_registry";
 
-const DEFAULT_TEACHER: TeacherAccount = {
-  id: "",
-  name: "",
-  username: "",
-  email: "",
-};
+const DEFAULT_TEACHER: TeacherAccount | null = null;
+
+function isGhostTeacherEntry(item: any): boolean {
+  if (!item || typeof item !== "object") return true;
+  const idVal = String(item.id || "").trim();
+  const nameVal = String(item.name || item.fullName || "").trim();
+  const unameVal = String(item.username || "").trim();
+  const emailVal = String(item.email || "").trim();
+  if (!idVal && !nameVal && !unameVal && !emailVal) return true;
+  if (!idVal && nameVal.toLowerCase() === "teacher" && unameVal.toLowerCase() === "teacher") {
+    return true;
+  }
+  return false;
+}
 
 const SECTION_STORAGE_KEYS = [
   "teacher_sections",
@@ -600,6 +609,7 @@ function VerifiedStudentAttendanceCalendar({ student }: { student: StudentEntry 
     }
     return "bg-[#0d1322] text-slate-500 border-slate-800/80";
   };
+
   return (
     <div className="bg-[#131b2e] border border-emerald-500/30 rounded-xl p-3.5 space-y-3">
       <div className="flex items-center justify-between gap-2">
@@ -689,7 +699,6 @@ function VerifiedStudentAttendanceCalendar({ student }: { student: StudentEntry 
     </div>
   );
 }
-
 // Read deleted IDs/names so deleted accounts never reappear
 function readDeletedRegistry(storageKey: string): Set<string> {
   if (typeof window === "undefined") return new Set();
@@ -796,7 +805,11 @@ function readAllStudentsFromStorage(): StudentEntry[] {
     const resolvedName = rawName || existing?.name || resolvedId;
     const resolvedUsername = resolvedName;
     const resolvedPassword = String(
-      item.password || item.defaultPassword || existing?.password || existing?.defaultPassword || resolvedId
+      item.password ||
+        item.defaultPassword ||
+        existing?.password ||
+        existing?.defaultPassword ||
+        resolvedId
     ).trim();
     const verified = isStudentFaceVerified(item) || Boolean(existing?.isVerified);
 
@@ -889,26 +902,19 @@ function readAllSubjectsFromStorage(): SubjectEntry[] {
   return Array.from(subMap.values());
 }
 
-// Read all registered teachers from storage while excluding deleted teachers
+// Read all registered teachers from storage while excluding ghost/blank and deleted teachers
 function readAllTeachersFromStorage(): TeacherAccount[] {
-  if (typeof window === "undefined") return [DEFAULT_TEACHER];
+  if (typeof window === "undefined") return [];
   const deletedSet = readDeletedRegistry(DELETED_TEACHERS_KEY);
   const teacherMap = new Map<string, TeacherAccount>();
 
-  const isDeletedTeacher = (t: any) =>
-    [t?.id, t?.name, t?.fullName, t?.username, t?.email]
+  const isExcludedTeacher = (t: any) => {
+    if (isGhostTeacherEntry(t)) return true;
+    const keys = [t?.id, t?.name, t?.fullName, t?.username, t?.email]
       .map((v) => String(v || "").trim().toLowerCase())
-      .filter(Boolean)
-      .some((k) => deletedSet.has(k));
-
-  const Deleted =
-    deletedSet.has("") ||
-    deletedSet.has("") ||
-    deletedSet.has("");
-
-  if (!Deleted) {
-    teacherMap.set("", DEFAULT_TEACHER);
-  }
+      .filter(Boolean);
+    return keys.some((k) => deletedSet.has(k));
+  };
 
   for (const key of TEACHER_LIST_KEYS) {
     try {
@@ -921,24 +927,17 @@ function readAllTeachersFromStorage(): TeacherAccount[] {
         ? parsed.teachers
         : [];
       for (const t of list) {
-        if (!t || typeof t !== "object") continue;
-        if (isDeletedTeacher(t)) continue;
-        const tNameLower = String(t.name || t.fullName || t.username || "")
-          .trim()
-          .toLowerCase();
-        const is =
-          String(t.id || "").toLowerCase() === "" ||
-          tNameLower.includes("");
-        const tId = is ? "" : String(t.id || t.username || t.name || "").trim();
+        if (isExcludedTeacher(t)) continue;
+        const tId = String(t.id || t.username || t.name || t.email || "").trim();
         if (!tId) continue;
         const mapKey = tId.toLowerCase();
         const existing = teacherMap.get(mapKey);
         teacherMap.set(mapKey, {
           ...existing,
           id: existing?.id || tId,
-          name: t.name || t.fullName || existing?.name || tId,
-          username: t.username || existing?.username || t.name || tId,
-          email: t.email || existing?.email || "",
+          name: String(t.name || t.fullName || existing?.name || tId).trim(),
+          username: String(t.username || existing?.username || t.name || tId).trim(),
+          email: String(t.email || existing?.email || "").trim(),
           photoUrl: t.photoUrl || t.avatar || existing?.photoUrl || "",
           avatar: t.avatar || t.photoUrl || existing?.avatar || ""
         });
@@ -955,16 +954,16 @@ function readAllTeachersFromStorage(): TeacherAccount[] {
       for (const u of parsed) {
         if (!u || typeof u !== "object") continue;
         if (String(u.role || "").toLowerCase() !== "teacher") continue;
-        if (isDeletedTeacher(u)) continue;
-        const tId = String(u.id || u.username || u.name || "").trim();
+        if (isExcludedTeacher(u)) continue;
+        const tId = String(u.id || u.username || u.name || u.email || "").trim();
         if (!tId) continue;
         const mapKey = tId.toLowerCase();
         if (!teacherMap.has(mapKey)) {
           teacherMap.set(mapKey, {
             id: tId,
-            name: u.name || u.fullName || u.username || tId,
-            username: u.username || u.name || tId,
-            email: u.email || "",
+            name: String(u.name || u.fullName || u.username || tId).trim(),
+            username: String(u.username || u.name || tId).trim(),
+            email: String(u.email || "").trim(),
             photoUrl: u.photoUrl || u.avatar || "",
             avatar: u.avatar || u.photoUrl || ""
           });
@@ -973,11 +972,10 @@ function readAllTeachersFromStorage(): TeacherAccount[] {
     } catch {}
   }
 
-  return Array.from(teacherMap.values());
+  return Array.from(teacherMap.values()).filter((t) => !isGhostTeacherEntry(t));
 }
 
 export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashboardProps) {
-  // Ordered flow: 1 Create Teacher Account Portal -> 2 Create Subject -> 3 Create Student Verification -> 4 Assign Student to a Teacher
   const [flowStep, setFlowStep] = useState<1 | 2 | 3 | 4>(1);
 
   const [teachers, setTeachers] = useState<TeacherAccount[]>(() => readAllTeachersFromStorage());
@@ -997,6 +995,7 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
   const [subjectDrafts, setSubjectDrafts] = useState<string[]>([""]);
   const [subjectTeacherSearch, setSubjectTeacherSearch] = useState("");
   const [newSubjectTeacherId, setNewSubjectTeacherId] = useState("");
+
   // Step 3: Create Student Verification (Auto 6-Digit Unique Default Password, Full Name = Username, Email Optional)
   const [newStudentName, setNewStudentName] = useState("");
   const [newStudentEmail, setNewStudentEmail] = useState("");
@@ -1013,6 +1012,10 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
+
+  const [resetRequests, setResetRequests] = useState<TeacherResetRequest[]>(() =>
+    getTeacherResetRequestsLocal()
+  );
 
   const getAuthToken = () => {
     if (token) return token;
@@ -1084,26 +1087,28 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
     setTeachers((prev) => {
       const map = new Map<string, TeacherAccount>();
       for (const t of prev) {
+        if (isGhostTeacherEntry(t)) continue;
         const keys = [t.id, t.name, t.username, t.email]
           .map((v) => String(v || "").trim().toLowerCase())
           .filter(Boolean);
         if (keys.some((k) => deletedSet.has(k))) continue;
-        const key = String(t.id || t.name || "").toLowerCase();
+        const key = String(t.id || t.name || t.username || "").trim().toLowerCase();
         if (key) map.set(key, t);
       }
       for (const t of incoming) {
+        if (isGhostTeacherEntry(t)) continue;
         const keys = [t.id, t.name, t.username, t.email]
           .map((v) => String(v || "").trim().toLowerCase())
           .filter(Boolean);
         if (keys.some((k) => deletedSet.has(k))) continue;
 
-        const key = String(t.id || t.name || "").toLowerCase();
+        const key = String(t.id || t.name || t.username || "").trim().toLowerCase();
         if (!key) continue;
         const merged = { ...map.get(key), ...t };
         const photo = readTeacherPhotoGlobal(merged) || merged.photoUrl || merged.avatar || "";
         map.set(key, photo ? { ...merged, photoUrl: photo, avatar: photo } : merged);
       }
-      return Array.from(map.values());
+      return Array.from(map.values()).filter((item) => !isGhostTeacherEntry(item));
     });
   };
 
@@ -1142,7 +1147,7 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
   };
 
   const syncAllLocalData = () => {
-    setTeachers(readAllTeachersFromStorage());
+    setTeachers(readAllTeachersFromStorage().filter((t) => !isGhostTeacherEntry(t)));
     mergeSubjectsSafely(readAllSubjectsFromStorage());
     mergeSectionsSafely(readAllSectionsFromStorage());
     setStudents(attachLatestPhotosToStudents(readAllStudentsFromStorage()));
@@ -1213,13 +1218,19 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
       syncAllLocalData();
     };
 
+    const refreshReset = () => setResetRequests(getTeacherResetRequestsLocal());
+
     window.addEventListener("storage", onSyncChange);
+    window.addEventListener("storage", refreshReset);
+    window.addEventListener("focus", refreshReset);
     window.addEventListener("teacher-profile-updated", onSyncChange);
     window.addEventListener("student-profile-updated", onSyncChange);
     window.addEventListener("admin-student-assigned", onSyncChange);
 
     return () => {
       window.removeEventListener("storage", onSyncChange);
+      window.removeEventListener("storage", refreshReset);
+      window.removeEventListener("focus", refreshReset);
       window.removeEventListener("teacher-profile-updated", onSyncChange);
       window.removeEventListener("student-profile-updated", onSyncChange);
       window.removeEventListener("admin-student-assigned", onSyncChange);
@@ -1249,7 +1260,6 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
     } catch {}
   };
 
-  // Delete a created subject from state, localStorage, and backend API
   const handleDeleteSubject = async (subject: SubjectEntry) => {
     if (!window.confirm(`Delete subject "${subject.name}"?`)) return;
 
@@ -1299,7 +1309,6 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
     setSuccessMsg(`Deleted subject "${subject.name}".`);
   };
 
-  // Step 1: Create Teacher Account Portal
   const handleCreateTeacherPortal = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!teacherFullName.trim()) return;
@@ -1330,7 +1339,7 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
       });
       const data = await res.json();
       const finalAccount = data?.success && data?.teacher ? data.teacher : createdAccount;
-      const nextTeachers = [...teachers, finalAccount];
+      const nextTeachers = [...teachers.filter((t) => !isGhostTeacherEntry(t)), finalAccount];
       setTeachers(nextTeachers);
       try {
         for (const k of TEACHER_LIST_KEYS) {
@@ -1344,7 +1353,7 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
       setShowTeacherPassword(false);
       setSuccessMsg(`Teacher account portal created for ${finalAccount.name}!`);
     } catch {
-      const nextTeachers = [...teachers, createdAccount];
+      const nextTeachers = [...teachers.filter((t) => !isGhostTeacherEntry(t)), createdAccount];
       setTeachers(nextTeachers);
       try {
         for (const k of TEACHER_LIST_KEYS) {
@@ -1362,9 +1371,8 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
     }
   };
 
-  // Wipe and delete all records tied to a Teacher across state, localStorage, calendars, and API
   const handleDeleteTeacherAccount = async (teacher: TeacherAccount) => {
-    const label = teacher.name || teacher.username || teacher.id;
+    const label = String(teacher?.name || teacher?.username || teacher?.id || "").trim() || "Teacher";
     if (
       !window.confirm(
         `Permanently delete teacher "${label}" and wipe all associated records from the system?`
@@ -1373,30 +1381,31 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
       return;
     }
 
-    const targetKeys = [teacher.id, teacher.name, teacher.username, teacher.email]
+    const targetKeys = [teacher?.id, teacher?.name, teacher?.username, teacher?.email]
       .map((v) => String(v || "").trim().toLowerCase())
       .filter(Boolean);
 
-    const matchesTeacher = (entry: any) =>
-      [entry?.id, entry?.name, entry?.fullName, entry?.username, entry?.email]
+    const matchesTeacher = (entry: any) => {
+      if (isGhostTeacherEntry(entry) && isGhostTeacherEntry(teacher)) return true;
+      const entryKeys = [entry?.id, entry?.name, entry?.fullName, entry?.username, entry?.email]
         .map((v) => String(v || "").trim().toLowerCase())
-        .filter(Boolean)
-        .some((k) => targetKeys.includes(k));
+        .filter(Boolean);
+      return targetKeys.length > 0 && entryKeys.some((k) => targetKeys.includes(k));
+    };
 
     recordDeletedEntries(DELETED_TEACHERS_KEY, [
-      teacher.id,
-      teacher.name,
-      teacher.username,
-      teacher.email
+      teacher?.id,
+      teacher?.name,
+      teacher?.username,
+      teacher?.email
     ]);
 
-    const updatedTeachers = teachers.filter((t) => !matchesTeacher(t));
+    const updatedTeachers = teachers.filter((t) => !matchesTeacher(t) && !isGhostTeacherEntry(t));
     setTeachers(updatedTeachers);
 
-    // Purge teacher linkage from subjects, sections, and students in state
     const updatedSubjects = subjects.map((sub) => {
       const ref = String(sub.teacherId || sub.assignedTeacherId || "").trim().toLowerCase();
-      return targetKeys.includes(ref)
+      return ref && targetKeys.includes(ref)
         ? { ...sub, teacherId: "", assignedTeacherId: "" }
         : sub;
     });
@@ -1419,10 +1428,10 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
     });
     persistStudentsList(updatedStudents);
 
-    if (targetKeys.includes(String(selectedTeacherId).toLowerCase())) {
+    if (selectedTeacherId && targetKeys.includes(String(selectedTeacherId).trim().toLowerCase())) {
       setSelectedTeacherId("");
     }
-    if (targetKeys.includes(String(newSubjectTeacherId).toLowerCase())) {
+    if (newSubjectTeacherId && targetKeys.includes(String(newSubjectTeacherId).trim().toLowerCase())) {
       setNewSubjectTeacherId("");
     }
     if (inspectedProfile?.kind === "teacher" && matchesTeacher(inspectedProfile.data)) {
@@ -1435,7 +1444,20 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
         if (!raw) continue;
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
-          localStorage.setItem(k, JSON.stringify(parsed.filter((item) => !matchesTeacher(item))));
+          localStorage.setItem(
+            k,
+            JSON.stringify(parsed.filter((item) => !matchesTeacher(item) && !isGhostTeacherEntry(item)))
+          );
+        } else if (parsed && typeof parsed === "object" && Array.isArray(parsed.teachers)) {
+          localStorage.setItem(
+            k,
+            JSON.stringify({
+              ...parsed,
+              teachers: parsed.teachers.filter(
+                (item: any) => !matchesTeacher(item) && !isGhostTeacherEntry(item)
+              )
+            })
+          );
         }
       }
 
@@ -1448,7 +1470,11 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
             accKey,
             JSON.stringify(
               parsed.filter(
-                (u: any) => !(String(u?.role || "").toLowerCase() === "teacher" && matchesTeacher(u))
+                (u: any) =>
+                  !(
+                    String(u?.role || "").toLowerCase() === "teacher" &&
+                    (matchesTeacher(u) || isGhostTeacherEntry(u))
+                  )
               )
             )
           );
@@ -1510,7 +1536,7 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
 
     try {
       const currentToken = getAuthToken();
-      if (currentToken) {
+      if (currentToken && teacher?.id) {
         await Promise.allSettled([
           fetch(`/api/admin/teachers/${encodeURIComponent(teacher.id)}`, {
             method: "DELETE",
@@ -1528,7 +1554,6 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
       `Deleted teacher "${label}" and cleared all associated records from the system.`
     );
   };
-
   // Wipe and delete Student Account across state, localStorage, attendance logs, assignments, and API
   const handleDeleteStudentAccount = async (student: StudentEntry) => {
     const label = student.name || student.username || student.id;
@@ -1618,6 +1643,7 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
 
     setSuccessMsg(`Deleted student "${label}" and cleared all associated records from the system.`);
   };
+
   // Step 2: Add / Remove / Submit Multiple Subjects
   const handleAddSubjectRow = () => {
     setSubjectDrafts((prev) => [...prev, ""]);
@@ -1887,7 +1913,9 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
     else if (onLogOut) onLogOut();
   };
 
-  const filteredTeachers = teachers.filter((t) => {
+  const visibleTeachers = teachers.filter((t) => !isGhostTeacherEntry(t));
+
+  const filteredTeachers = visibleTeachers.filter((t) => {
     const q = teacherSearch.trim().toLowerCase();
     if (!q) return true;
     return (
@@ -1897,7 +1925,7 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
     );
   });
 
-  const filteredSubjectTeachers = teachers.filter((t) => {
+  const filteredSubjectTeachers = visibleTeachers.filter((t) => {
     const q = subjectTeacherSearch.trim().toLowerCase();
     if (!q) return true;
     return (
@@ -1907,7 +1935,7 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
     );
   });
 
-  const filteredAssignTeachers = teachers.filter((t) => {
+  const filteredAssignTeachers = visibleTeachers.filter((t) => {
     const q = assignTeacherSearch.trim().toLowerCase();
     if (!q) return true;
     return (
@@ -1938,7 +1966,8 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
   });
 
   const selectedStudentObj = students.find((s) => String(s.id) === String(selectedStudentId)) || null;
-  const selectedTeacherObj = teachers.find((t) => String(t.id) === String(selectedTeacherId)) || null;
+  const selectedTeacherObj =
+    visibleTeachers.find((t) => String(t.id) === String(selectedTeacherId)) || null;
   const selectedTeacherSubjects = subjects.filter(
     (sub) =>
       String(sub.teacherId || "") === String(selectedTeacherId) ||
@@ -1947,20 +1976,7 @@ export default function AdminDashboard({ token, onLogout, onLogOut }: AdminDashb
   const selectedTeacherSections = sections.filter(
     (sec) => !sec.teacherId || String(sec.teacherId) === String(selectedTeacherId)
   );
-  const [resetRequests, setResetRequests] = useState<TeacherResetRequest[]>(() =>
-  getTeacherResetRequestsLocal()
-);
 
-useEffect(() => {
-  const refresh = () => setResetRequests(getTeacherResetRequestsLocal());
-  refresh();
-  window.addEventListener('storage', refresh);
-  window.addEventListener('focus', refresh);
-  return () => {
-    window.removeEventListener('storage', refresh);
-    window.removeEventListener('focus', refresh);
-  };
-}, []);
   return (
     <div className="min-h-screen bg-[#070b14] text-white p-4 md:p-6 space-y-6 select-none">
       {/* Clean Top Admin Header */}
@@ -1996,7 +2012,7 @@ useEffect(() => {
         >
           <p className="text-[10px] font-black uppercase tracking-wider opacity-80">1. TEACHER PORTAL</p>
           <p className="text-sm font-bold mt-0.5">Create Teacher Account Portal</p>
-          <p className="text-[11px] opacity-80 mt-1">{teachers.length} Registered Teachers</p>
+          <p className="text-[11px] opacity-80 mt-1">{visibleTeachers.length} Registered Teachers</p>
         </button>
 
         <button
@@ -2052,7 +2068,6 @@ useEffect(() => {
           {successMsg}
         </p>
       )}
-
       {/* 1. CREATE TEACHER ACCOUNT PORTAL + SEARCHABLE / CLICKABLE / DELETABLE TEACHERS */}
       {flowStep === 1 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 text-xs">
@@ -2090,7 +2105,7 @@ useEffect(() => {
                   type="email"
                   value={teacherEmail}
                   onChange={(e) => setTeacherEmail(e.target.value)}
-                  placeholder="e.g. Juan Dela Cruz"
+                  placeholder="teacher@edu.com"
                   className="w-full px-3.5 py-2.5 rounded-xl bg-[#131b2e] border border-slate-700 text-white"
                 />
               </div>
@@ -2133,76 +2148,91 @@ useEffect(() => {
               </h2>
               <span className="text-[11px] text-slate-400">Click teacher to inspect or delete</span>
             </div>
-          <div className="bg-[#0d1222] border border-white/10 rounded-2xl p-4 space-y-3 text-xs text-white">
-  <div className="flex items-center justify-between gap-2">
-    <h3 className="font-black text-sm">Teacher Password Reset Requests</h3>
-    <div className="flex items-center gap-2">
-      <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-bold text-[11px]">
-        {resetRequests.filter((r) => r.status === 'pending').length} Pending
-      </span>
-      {resetRequests.length > 0 && (
-        <button
-          type="button"
-          onClick={() => setResetRequests(clearTeacherResetRequests())}
-          className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 font-bold text-[11px] cursor-pointer"
-        >
-          Clear
-        </button>
-      )}
-    </div>
-  </div>
 
-  {resetRequests.length === 0 ? (
-    <p className="text-slate-400">No teacher password reset requests yet.</p>
-  ) : (
-    resetRequests.map((req) => (
-      <div
-        key={req.id}
-        className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 py-2.5 border-t border-white/10 first:border-t-0"
-      >
-        <div>
-          <p className="font-bold text-white">
-            {req.username}{' '}
-            <span className="text-[11px] uppercase text-indigo-300">({req.status})</span>
-          </p>
-          {req.note && <p className="text-slate-400 text-[11px]">Note: {req.note}</p>}
-        </div>
+            <div className="relative">
+              <Search size={14} className="absolute left-3.5 top-2.5 text-slate-400" />
+              <input
+                type="text"
+                value={teacherSearch}
+                onChange={(e) => setTeacherSearch(e.target.value)}
+                placeholder="Search teacher name, username, or email..."
+                className="w-full pl-9 pr-3.5 py-2 rounded-xl bg-[#131b2e] border border-slate-700 text-white"
+              />
+            </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          {req.status === 'pending' && (
-            <>
-              <button
-                type="button"
-                onClick={() =>
-                  setResetRequests(updateTeacherResetRequestStatus(req.id, 'approved'))
-                }
-                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold cursor-pointer"
-              >
-                Approve
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  setResetRequests(updateTeacherResetRequestStatus(req.id, 'rejected'))
-                }
-                className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold cursor-pointer"
-              >
-                Reject
-              </button>
-            </>
-          )}
-          <button
-            type="button"
-            onClick={() => setResetRequests(deleteTeacherResetRequest(req.id))}
-            className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold cursor-pointer"
-          >
-            Delete
-          </button>
-        </div>
-      </div>
-    ))
-  )}
-</div>
+            <div className="bg-[#0d1222] border border-white/10 rounded-2xl p-4 space-y-3 text-xs text-white">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="font-black text-sm">Teacher Password Reset Requests</h3>
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-bold text-[11px]">
+                    {resetRequests.filter((r) => r.status === "pending").length} Pending
+                  </span>
+                  {resetRequests.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setResetRequests(clearTeacherResetRequests())}
+                      className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 font-bold text-[11px] cursor-pointer"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {resetRequests.length === 0 ? (
+                <p className="text-slate-400">No teacher password reset requests yet.</p>
+              ) : (
+                resetRequests.map((req) => (
+                  <div
+                    key={req.id}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 py-2.5 border-t border-white/10 first:border-t-0"
+                  >
+                    <div>
+                      <p className="font-bold text-white">
+                        {req.username}{" "}
+                        <span className="text-[11px] uppercase text-indigo-300">
+                          ({req.status})
+                        </span>
+                      </p>
+                      {req.note && <p className="text-slate-400 text-[11px]">Note: {req.note}</p>}
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {req.status === "pending" && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setResetRequests(updateTeacherResetRequestStatus(req.id, "approved"))
+                            }
+                            className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold cursor-pointer"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setResetRequests(updateTeacherResetRequestStatus(req.id, "rejected"))
+                            }
+                            className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold cursor-pointer"
+                          >
+                            Reject
+                          </button>
+                        </>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setResetRequests(deleteTeacherResetRequest(req.id))}
+                        className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold cursor-pointer"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
             <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
               {filteredTeachers.length === 0 ? (
                 <p className="text-slate-500 italic py-6 text-center">No registered teachers found.</p>
@@ -2352,13 +2382,15 @@ useEffect(() => {
           </form>
 
           <div className="bg-[#0d1322] border border-slate-800 rounded-2xl p-5 space-y-3">
-            <h2 className="text-base font-bold text-emerald-400">Created Subjects ({subjects.length})</h2>
+            <h2 className="text-base font-bold text-emerald-400">
+              Created Subjects ({subjects.length})
+            </h2>
             {subjects.length === 0 ? (
               <p className="text-slate-500 italic py-6 text-center">No subjects created yet.</p>
             ) : (
               <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
                 {subjects.map((sub) => {
-                  const tObj = teachers.find(
+                  const tObj = visibleTeachers.find(
                     (t) => String(t.id) === String(sub.teacherId || sub.assignedTeacherId)
                   );
                   return (
@@ -2420,13 +2452,15 @@ useEffect(() => {
             </p>
 
             <div>
-              <label className="text-slate-300 font-bold block mb-1">Student Full Name (Username)</label>
+              <label className="text-slate-300 font-bold block mb-1">
+                Student Full Name (Username)
+              </label>
               <input
                 type="text"
                 required
                 value={newStudentName}
                 onChange={(e) => setNewStudentName(e.target.value)}
-                placeholder="e.g. Juan Dela Cruz"
+                placeholder="e.g. Nimrold C. Albaracin"
                 className="w-full px-3.5 py-2.5 rounded-xl bg-[#131b2e] border border-slate-700 text-white font-bold"
               />
             </div>
@@ -2465,7 +2499,7 @@ useEffect(() => {
                 type="text"
                 value={enrolledStudentSearch}
                 onChange={(e) => setEnrolledStudentSearch(e.target.value)}
-                placeholder="e.g. Juan Dela Cruz or 6-digit password"
+                placeholder="Search student name or 6-digit password"
                 className="w-full pl-9 pr-3.5 py-2.5 rounded-xl bg-[#131b2e] border border-slate-700 text-white"
               />
             </div>
@@ -2536,13 +2570,16 @@ useEffect(() => {
           </div>
         </div>
       )}
+
       {/* 4. ASSIGN STUDENT TO A TEACHER (SEARCHABLE STUDENT & SEARCHABLE TEACHER + CLICK TO UNSELECT) */}
       {flowStep === 4 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 text-xs">
           <div className="bg-[#0d1322] border border-slate-800 rounded-2xl p-5 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-base font-bold text-emerald-400">Select Student</h2>
-              <span className="text-[11px] text-slate-400">{filteredAssignStudents.length} students</span>
+              <span className="text-[11px] text-slate-400">
+                {filteredAssignStudents.length} students
+              </span>
             </div>
 
             <div className="relative">
@@ -2551,7 +2588,7 @@ useEffect(() => {
                 type="text"
                 value={assignStudentSearch}
                 onChange={(e) => setAssignStudentSearch(e.target.value)}
-                placeholder="e.g. Juan Dela Cruz or 6-digit password"
+                placeholder="Search student name or 6-digit password"
                 className="w-full pl-9 pr-3.5 py-2.5 rounded-xl bg-[#131b2e] border border-slate-700 text-white"
               />
             </div>
@@ -2658,7 +2695,9 @@ useEffect(() => {
                   <p className="text-sm font-bold text-emerald-300 mt-0.5">
                     {selectedStudentObj
                       ? `${selectedStudentObj.name || selectedStudentObj.username} (Pass: ${
-                          selectedStudentObj.password || selectedStudentObj.defaultPassword || selectedStudentObj.id
+                          selectedStudentObj.password ||
+                          selectedStudentObj.defaultPassword ||
+                          selectedStudentObj.id
                         })`
                       : "Click a student on the left"}
                   </p>
@@ -2983,7 +3022,8 @@ useEffect(() => {
                 </div>
                 <div className="bg-[#131b2e] border border-slate-800 rounded-xl p-3 space-y-1 text-slate-300">
                   <p>
-                    Teacher: <strong className="text-emerald-300">{inspectedProfile.teacherName}</strong>
+                    Teacher:{" "}
+                    <strong className="text-emerald-300">{inspectedProfile.teacherName}</strong>
                   </p>
                   <p>
                     Room: <strong>{inspectedProfile.data.room || "N/A"}</strong>
@@ -3006,4 +3046,54 @@ useEffect(() => {
       )}
     </div>
   );
+}
+
+// Final post-mount safeguard to scrub blank/ghost teacher entries from localStorage
+if (typeof window !== "undefined") {
+  try {
+    const scrubKeys = [
+      ...TEACHER_LIST_KEYS,
+      "users",
+      "registered_users",
+      "accounts",
+      "teacher_accounts"
+    ];
+    for (const k of scrubKeys) {
+      const raw = localStorage.getItem(k);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw);
+      const isGhost = (item: any) => {
+        if (!item || typeof item !== "object") return false;
+        if (
+          (k === "users" || k === "registered_users" || k === "accounts") &&
+          String(item?.role || "").toLowerCase() !== "teacher"
+        ) {
+          return false;
+        }
+        const idVal = String(item.id || "").trim();
+        const nameVal = String(item.name || item.fullName || "").trim();
+        const unameVal = String(item.username || "").trim();
+        if (!idVal && !nameVal && !unameVal) return true;
+        if (
+          !idVal &&
+          nameVal.toLowerCase() === "teacher" &&
+          unameVal.toLowerCase() === "teacher"
+        ) {
+          return true;
+        }
+        return false;
+      };
+      if (Array.isArray(parsed)) {
+        localStorage.setItem(k, JSON.stringify(parsed.filter((item) => !isGhost(item))));
+      } else if (parsed && typeof parsed === "object" && Array.isArray(parsed.teachers)) {
+        localStorage.setItem(
+          k,
+          JSON.stringify({
+            ...parsed,
+            teachers: parsed.teachers.filter((item: any) => !isGhost(item))
+          })
+        );
+      }
+    }
+  } catch {}
 }
