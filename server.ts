@@ -4,6 +4,8 @@ import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import QRCode from 'qrcode';
+import path from 'path';
+import fs from 'fs';
 
 const prisma = new PrismaClient();
 const app = express();
@@ -240,6 +242,7 @@ app.delete('/api/admin/subjects/:id', authenticateToken, async (req: any, res: a
     res.status(500).json({ success: false, error: 'Failed to delete subject.' });
   }
 });
+
 // ================= ADMIN STUDENT ENDPOINTS =================
 
 app.post('/api/admin/students', authenticateToken, async (req: any, res: any) => {
@@ -262,7 +265,7 @@ app.post('/api/admin/students', authenticateToken, async (req: any, res: any) =>
         passwordHash: cleanId,
         subjectId: subjectId || null,
         // Default unverified face status requiring admin/face verification
-        isVerified: false, 
+        isVerified: false,
       },
       include: { subject: { include: { teacher: true } } },
     });
@@ -350,15 +353,15 @@ app.get('/api/state/teacher', authenticateToken, async (req: any, res: any) => {
       orderBy: { createdAt: 'desc' },
     });
 
-    // RESTRICTION LOGIC: If student is NOT face-verified, teacher cannot see real status (defaults to Pending Verification with ⚠️ caution)
+    // RESTRICTION LOGIC: If student is NOT face-verified, teacher cannot see real status (defaults to Pending Verification with caution badge)
     const records = rawRecords.map((rec) => {
       const isFaceVerified = rec.student?.isVerified ?? false;
       return {
         ...rec,
         status: isFaceVerified ? rec.status : '⚠️ Pending Face Verification',
-        colorCode: isFaceVerified 
-          ? (rec.status === 'Present' ? 'emerald' : rec.status === 'Late' ? 'amber' : 'rose') 
-          : 'amber', // Color coding for calendar/maps
+        colorCode: isFaceVerified
+          ? (rec.status === 'Present' ? 'emerald' : rec.status === 'Late' ? 'amber' : 'rose')
+          : 'amber',
       };
     });
 
@@ -449,6 +452,7 @@ app.delete('/api/sections/:id', authenticateToken, async (req: any, res: any) =>
     res.status(500).json({ success: false, error: 'Failed to delete section.' });
   }
 });
+
 app.put('/api/sections/:id/toggle-verification', authenticateToken, async (req: any, res: any) => {
   try {
     const { requireTeacherApproval } = req.body;
@@ -637,6 +641,24 @@ app.put('/api/student/change-password', authenticateToken, async (req: any, res:
     res.status(500).json({ success: false, error: 'Failed to update password.' });
   }
 });
+
+// ================= FRONTEND STATIC FILES & SPA FALLBACK =================
+
+// Resolve the built frontend directory (supports running from project root or dist/server.cjs)
+const distDir = fs.existsSync(path.resolve(process.cwd(), 'dist', 'index.html'))
+  ? path.resolve(process.cwd(), 'dist')
+  : path.resolve(__dirname, '..', 'dist');
+
+// Serve static Vite assets when the production build exists
+if (fs.existsSync(path.join(distDir, 'index.html'))) {
+  app.use(express.static(distDir));
+
+  // Fallback to index.html for non-API routes so React handles routing cleanly
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) return next();
+    res.sendFile(path.join(distDir, 'index.html'));
+  });
+}
 
 // ================= START SERVER =================
 
